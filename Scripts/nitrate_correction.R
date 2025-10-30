@@ -32,11 +32,15 @@ nitrate_offsets <- dat_interpolated %>%
 
 
 #Plot the offset timeseries of each float
-ggplot(nitrate_offsets) +
+ggplot(filter(nitrate_offsets, date > as.Date("2021-01-01"))) +
   geom_line(aes(x = date, y = nitrate_offset, color = as.factor(float_wmo))) +
   geom_line(aes(x = date, y = nitrate_ref, color = as.factor(float_wmo)), linetype = "dashed") +
   labs(x = "Date", y = "Nitrate Offset (µmol/kg)", color = "Float WMO") +
-  theme_minimal()
+  theme_minimal()+
+  ggtitle("Nitrate Offset Time Series by Float")+
+  theme(legend.position = "bottom")
+
+ggsave("Output/nitrate_offset_timeseries.png", width = 10, height = 8, dpi = 300)
 
 
 #Apply substract the difference between nitrate_offset and nitrate_ref to the nitrate_interp values

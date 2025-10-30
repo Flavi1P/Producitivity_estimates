@@ -20,13 +20,13 @@ ggsave("Output/float_locations_icb.png", width = 8, height = 6)
 dat <- filter(dat, lon >= -45 & lon <= -10 & lat >= 54 & lat <= 63)
 range(dat$date)
 #filter to keep data between 2019 and now
-dat <- filter(dat, date >= as.Date("2022-01-01"))
+dat <- filter(dat, date >= as.Date("2019-01-01"))
 # MLD and Zeu time series -------------------------------------------------
 
 #Artificially set zeu as 40 if NA
-# dat <- dat |> 
-#   mutate(zeu = case_when(is.na(zeu) ~ 40,
-#                          TRUE ~ zeu))
+dat <- dat |> 
+   mutate(zeu = case_when(is.na(zeu) ~ 40,
+                          TRUE ~ zeu))
 #Create a dataset with MLD and Zeu for each profile 
 dat_prof <- dat |> select(float_wmo, prof_number, date, MLD, zeu) |> 
   distinct() |> 
@@ -58,7 +58,7 @@ ggplot(dat_prof)+
   geom_line(aes(x = date, y = -zeu_smooth, color = "Zeu"))+
   labs(y = "Depth (m)", color = "Parameter")+
   theme_minimal()
-ggsave("Output/mld_zeu_time_series_icb.png", width = 10, height = 6)
+ggsave("Output/mld_zeu_time_series_icb2.png", width = 10, height = 6)
   
 dat <- left_join(dat, select(dat_prof, prof_number, float_wmo, mld_smooth, zeu_smooth), by = c("float_wmo", "prof_number"))
 
@@ -106,7 +106,7 @@ ggplot(filter(prof_dat_smoothed, !is.na(mld)))+
   geom_line(aes(x = date_10day, y = -NCP_integration_depth_smooth))+
   geom_line(aes(x = date_10day, y = -next_integration_depth_smooth), linetype = "dashed")
 
-ggsave("Output/integration_depth_time_series_icb.png", width = 10, height = 6)
+ggsave("Output/integration_depth_time_series_icb2.png", width = 10, height = 6)
 prof_dat_smoothed <- na.omit(prof_dat_smoothed)
 
 
@@ -118,7 +118,8 @@ dat_smoothed <- dat %>%
   group_by(date_10day, depth) %>%
   summarise(
     nitrate = mean(nitrate_corrected, na.rm = TRUE),
-    npp = mean(cbpm_npp, na.rm = TRUE)) |> 
+    npp = mean(cbpm_npp, na.rm = TRUE),
+    chla = mean(chla, na.rm = TRUE)) |> 
   ungroup() |> 
   full_join(time_grid, by = "date_10day") %>%     # ensure regular 10-day spacing
   arrange(date_10day) %>%
@@ -147,7 +148,10 @@ dat_final <- dat_smoothed |>
     next_int_N_mmol_m2 = integrate(nitrate, depth, from = 0, to = unique(next_integration_depth)),
     npp = integrate(npp, depth, from = 0, to = 200),
     mld_concentration = integrate(nitrate, depth, from = unique(NCP_integration_depth) - 20, to = unique(NCP_integration_depth) - 10) / 10,
-    sub_mld_concentration = integrate(nitrate, depth, from = unique(NCP_integration_depth) + 20, to = unique(NCP_integration_depth) + 30) / 10
+    sub_mld_concentration = integrate(nitrate, depth, from = unique(NCP_integration_depth) + 20, to = unique(NCP_integration_depth) + 30) / 10,
+    chla_integrated = integrate(chla, depth, from = 0, to = unique(NCP_integration_depth)),
+    chla_mld = integrate(chla, depth, from = 0, to = unique(mld)),
+    chla_surf = integrate(chla, depth, from = 0, to = 10)
   ) |> 
   ungroup()
 
@@ -159,7 +163,19 @@ ggplot(dat_final)+
   theme_minimal()+
   scale_x_date(date_labels = "%b %Y", breaks = "1 months")
 
-ggsave("Output/integrated_nitrate_time_series_icb.png", width = 10, height = 6)
+ggsave("Output/integrated_nitrate_time_series_icb2.png", width = 10, height = 6)
+
+ggplot(dat_final)+
+  geom_line(aes(x = date_10day, y = chla_integrated, color = "Integration depth"))+
+  geom_point(aes(x = date_10day, y = chla_mld, color = "MLD"))+
+  geom_line(aes(x = date_10day, y = chla_surf, color = "Surface (10m)"))+
+  labs(y = "Integrated Chla (mg m-2)")+
+  theme_minimal()+
+  scale_x_date(date_labels = "%b %Y", breaks = "6 months")
+
+ggsave("Output/integrated_chla_time_series_icb2.png", width = 10, height = 6)
+
+
 #Smoothing the integration
 dat_final_smoothed <- dat_final %>%
   mutate(
@@ -175,7 +191,7 @@ ggplot(dat_final_smoothed)+
   scale_x_date(date_labels = "%b %Y", breaks = "2 months")+
   ggtitle("Smoothed Integrated Nitrate Time Series ICB")
 
-ggsave("Output/integrated_nitrate_smooth_time_series_icb.png", width = 10, height = 6)
+ggsave("Output/integrated_nitrate_smooth_time_series_icb2.png", width = 10, height = 6)
 # Computing NCP -----------------------------------------------------------
 
 
@@ -204,24 +220,24 @@ ggplot(ncp_results)+
   scale_color_viridis_c()
 
 
-ggplot(ncp_results)+
+ggplot(filter(ncp_results, npp != 0))+
   geom_line(aes(x = date_10day, y = npp_smooth/12, color = "NPP"))+
   geom_errorbar(aes(x = date_10day, y = npp_smooth/12, ymin = npp_smooth/12 - npp_sd/12, ymax = npp_smooth/12 + npp_sd/12), alpha = 0.3)+
   geom_errorbar(aes(x = date_10day, ymin = ncp_smooth - ncp_sd, ymax = ncp_smooth + ncp_sd), alpha = 0.3)+
   geom_line(aes(x = date_10day, y = ncp_smooth, color = "NCP"))+
   labs(y = "mmol C m-2 d-1")+
   theme_bw()+
-  scale_x_date(date_labels = "%b %Y", breaks = "1 months")+
+  scale_x_date(date_labels = "%b %Y", breaks = "2 months")+
   xlab("Date")
 
-ggsave("Output/ncp_time_series_icb.png", width = 10, height = 6)
+ggsave("Output/ncp_time_series_icb3.png", width = 10, height = 6)
 
 ncp_results <- ncp_results |> 
   mutate(status = case_when(ncp_smooth > 0 ~ "autotrophic",
                             ncp_smooth < 0 ~ "heterotrophic",
                             TRUE ~ "balanced"))
 
-ggplot(ncp_results)+
+ggplot(filter(ncp_results, npp != 0))+
   geom_point(aes(x = date_10day, y = ncp_smooth, color = status))+
   geom_line(aes(x = date_10day, y = npp_smooth/12), linetype = "dashed")+
   labs(y = "mmol C m-2 d-1")+
@@ -229,20 +245,25 @@ ggplot(ncp_results)+
   theme_minimal()+
   scale_x_date(date_labels = "%b %Y", breaks = "2 months")+
   xlab("Date")
+  
 
-ggsave("Output/ncp_status_time_series_icb.png", width = 10, height = 6)
+ggsave("Output/ncp_status_time_series_icb3.png", width = 10, height = 6)
 
 ncp_results <- ncp_results |>
   mutate(trophic_index = ncp_smooth/npp_smooth)
 
-ggplot(ncp_results)+
+ggplot(filter(ncp_results, npp != 0))+
   geom_line(aes(x = date_10day, y = trophic_index))+
   geom_point(aes(x = date_10day, y = trophic_index, color = status))+
-  scale_color_manual(values = c("autotrophic" = "blue", "heterotrophic" = "red", "balanced" = "grey"))+
+  geom_line(aes(x = date_10day, y = chla_surf/100, color = "Surface chla"), data = filter(dat_final, npp !=0))+
+  geom_line(aes(x = date_10day, y = chla_integrated/100, color = "Integrated chla"), data = filter(dat_final, npp !=0))+
+  scale_color_manual(values = c("autotrophic" = "blue", "heterotrophic" = "red", "balanced" = "grey", "Integrated chla" = "green", "Surface chla" = "darkgreen"))+
   theme_minimal()+
   scale_x_date(date_labels = "%b %Y", breaks = "2 months")+
   xlab("Date")+
   ylab("Trophic Index (NCP/NPP)")
+
+ggsave("Output/trophic_index_time_series_icb_with_chla2.png", width = 10, height = 6)
 
 ggplot(ncp_results)+
   geom_line(aes(x = date_10day, y = -mld))+

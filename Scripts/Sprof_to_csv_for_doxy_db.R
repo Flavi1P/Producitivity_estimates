@@ -7,9 +7,15 @@ library(zoo)
 # open the Sprof NetCDF
 #nc <- nc_open("Data/Raw/Floats/3901586_Sprof.nc")
 
-files <- list.files("Data/Raw/Floats/", pattern = "_Sprof.nc", full.names = TRUE)
+files <- list.files("C:/Users/flapet/OneDrive - NOC/Documents/IDAPro/lib/db_building/data/argo_nc/Doxy_floats/", pattern = "_Sprof.nc", full.names = TRUE)
+
+pb <- txtProgressBar(min = 0, max = length(files), style = 3)
+i <- 0
+
 for(file in files){
-  print(paste(file, "started..."))
+  
+  i <- i + 1
+  setTxtProgressBar(pb, i)
   nc <- nc_open(file)
   # extract metadata
   lon   <- ncvar_get(nc, "LONGITUDE")
@@ -24,12 +30,19 @@ for(file in files){
   sal   <- ncvar_get(nc, "PSAL")
   oxygen <- ncvar_get(nc, "DOXY_ADJUSTED")
   
+  #test if CHLA_ADJUSTED in NCDf is so extract it else assig n chla as NA
+  if("CHLA_ADJUSTED" %in% names(nc$var)){
+    chla  <- ncvar_get(nc, "CHLA_ADJUSTED")
+  } else {
+    chla <- matrix(NA, nrow = dim(depth)[1], ncol = dim(depth)[2])
+  }
+  
   qc <- ncvar_get(nc, "DOXY_ADJUSTED_QC")
   #create filename
   wmo <- ncvar_get(nc, "PLATFORM_NUMBER")[1]
   #remove whitespace
   wmo <- gsub(" ", "", wmo)
-  filename <- paste0("Data/Intermediate/Floats/Doxy_db/argo_", wmo, "_interp.csv")
+  filename <- paste0("Data/Intermediate/Floats/full_db/argo_", wmo, "_interp.csv")
   
   # close connection
   nc_close(nc)
@@ -57,6 +70,7 @@ for(file in files){
     depth = as.vector(depth),
     temp  = as.vector(temp),
     sal   = as.vector(sal),
+    chla = as.vector(chla),
     oxygen = oxygen
   )
   
@@ -91,13 +105,13 @@ for(file in files){
     arrange(date) %>% 
     mutate(prof_number = dense_rank(date))
   
-  t <- filter(df_interp, prof_number == 75)
-  
   # save the csv ------------------------------------------------------------
   
   write_csv(df_interp, filename)
   print(paste0(filename, " written"))
 }
+
+close(pb)
 
 ggplot(t)+
   geom_point(aes(x = oxygen, y = -depth))

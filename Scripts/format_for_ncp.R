@@ -24,7 +24,7 @@ range(dat$date)
 
 library(vroom)
 
-npp <- vroom("Data/Processed/argo_pp_estimations_floats_09_2025.csv")
+npp <- vroom("Data/Processed/argo_pp_estimations_floats_11_2025.csv")
 
 npp <- npp |> mutate(date = lubridate::date(JULD),
                      float_wmo = as.character(PLATFORM_NUMBER)) |> 
@@ -96,7 +96,7 @@ ggplot(prof_dat)+
 
 dat_all_pp <- left_join(dat_all_pp, prof_dat)
 
-ggplot(select(dat_all_pp, float_wmo, lon, lat, date) |> distinct() |> filter(lon > -25 & lat  > 59))+
+ggplot(select(dat_all_pp, float_wmo, lon, lat, date) |> distinct())+
   geom_point(aes(x = lon, y = lat, color= date))+
   coord_quickmap()
   

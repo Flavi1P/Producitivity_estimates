@@ -1,13 +1,12 @@
 library(ncdf4)
-library(dplyr)
-library(tidyr)
+library(tidyverse)
 library(lubridate)
 library(zoo)
 
 # open the Sprof NetCDF
 #nc <- nc_open("Data/Raw/Floats/3901586_Sprof.nc")
 
-files <- list.files("Data/Raw/Floats/", pattern = "_Sprof.nc", full.names = TRUE)
+files <- list.files("Data/Raw/Alex/", pattern = "_Sprof.nc", full.names = TRUE)
 for(file in files){
   print(paste(file, "started..."))
   nc <- nc_open(file)
@@ -24,14 +23,14 @@ for(file in files){
   #ipar  <- ncvar_get(nc, "DOWNWELLING_PAR")
   temp  <- ncvar_get(nc, "TEMP")
   sal   <- ncvar_get(nc, "PSAL")
-  nitrate <- ncvar_get(nc, "NITRATE")
-  oxygen <- ncvar_get(nc, "DOXY_ADJUSTED")
+  #nitrate <- ncvar_get(nc, "NITRATE")
+  #oxygen <- ncvar_get(nc, "DOXY_ADJUSTED")
   
   #create filename
   wmo <- ncvar_get(nc, "PLATFORM_NUMBER")[1]
   #remove whitespace
   wmo <- gsub(" ", "", wmo)
-  filename <- paste0("Data/Intermediate/Floats/argo_", wmo, "_interp.csv")
+  filename <- paste0("Data/Intermediate/Alex/argo_", wmo, "_interp.csv")
   
   # close connection
   nc_close(nc)
@@ -56,8 +55,8 @@ for(file in files){
     #iPAR  = as.vector(ipar),
     temp  = as.vector(temp),
     sal   = as.vector(sal),
-    nitrate = as.vector(nitrate),
-    oxygen = as.vector(oxygen)
+    #nitrate = as.vector(nitrate),
+    #oxygen = as.vector(oxygen)
   )
   
   df_nona <- filter(df, !is.na(temp))
@@ -75,7 +74,7 @@ for(file in files){
     arrange(lon, lat, date, depth) %>%
     group_by(lon, lat, date) %>%
     mutate(across(
-      c(chla, bbp, oxygen, temp, sal, nitrate),
+      c(chla, bbp, temp, sal),
       ~ if (sum(!is.na(.x)) > 10) {
         na.approx(.x, x = depth, na.rm = FALSE, rule = 2)
       } else {

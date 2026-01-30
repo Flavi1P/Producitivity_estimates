@@ -7,7 +7,7 @@ library(patchwork)
 source("Scripts/cbpm_r/cbpm_argo.r")
 source("Scripts/cbpm_r/despike.r")
 
-files <- list.files("Data/Intermediate/Floats/", full.names = TRUE)
+files <- list.files("Data/Intermediate/Full_doxy_db/", full.names = TRUE)
 
 dat <- data.frame()
 for(file in files){
@@ -34,16 +34,18 @@ prof_dat <- dat |>
 
 
 ggplot(prof_dat)+
-  geom_point(aes(x = date, y = - MLD, color = float_wmo))
+  geom_point(aes(x = date, y = - MLD))
 
 dat_all_pp <- left_join(dat, prof_dat)
 
-ggplot(select(dat_all_pp, float_wmo, lon, lat, date) |> distinct() |> filter(lon > -25 & lat  > 59))+
+ggplot(select(dat_all_pp, float_wmo, lon, lat, date) |> distinct())+
   geom_point(aes(x = lon, y = lat, color= date))+
+  geom_rect(aes(xmin = -45, xmax = -10, ymin = 58, ymax = 65), fill = NA, color = "red")+
   coord_quickmap()
   
 
 data_to_share <- dat_all_pp |> 
-  select(prof_number, lon, lat, date, oxygen, depth, temp, sal, MLD)
+  select(float_wmo, prof_number, lon, lat, date, oxygen, depth, temp, sal, MLD) %>% 
+  filter(lon >= -40 & lon <= -10 & lat >= 58 & lat <= 65)
 
-write_csv(data_to_share, "Data/Processed/float_oxygen_data_without_pp.csv")
+write_csv(data_to_share, "Data/Processed/float_full_db_oxygen_data_without_pp.csv")

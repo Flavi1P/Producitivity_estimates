@@ -5,7 +5,6 @@ library(zoo)
 
 dat <- read_csv2("Data/Processed/productivity_float_with_canyon.csv")
 
-
 # filter the dataset to stay with ICB -------------------------------------
 #add iceland contour on map
 
@@ -18,7 +17,7 @@ ggplot(select(dat, lon, lat) |> distinct())+
 
 ggsave("Output/float_locations_icb.png", width = 8, height = 6)
 dat <- filter(dat, lon >= -40 & lon <= -10 & lat >= 58 & lat <= 65) %>% 
-  mutate(float_wmo = 3902681)
+  mutate(float_wmo = "prodctivity_float")
 range(dat$date)
 
 # MLD and Zeu time series -------------------------------------------------
@@ -40,8 +39,19 @@ dat_smooth <- dat_prof %>%
 # Fit spline
 fit_mld <- smooth.spline(as.numeric(dat_smooth$date), dat_smooth$MLD, spar = 0.6)
 fit_zeu <- smooth.spline(as.numeric(dat_smooth$date), dat_smooth$zeu, spar = 0.6)
+
+fit_mld <- loess(
+  MLD ~ as.numeric(date),
+  data = dat_smooth,
+  span = 0.3,
+  family = "symmetric"   # <-- makes it robust to deep outliers
+)
+
+pred_mld <- predict(fit_mld, newdata = data.frame(date = as.numeric(dat_prof$date)))
+pred_mld <- pmax(pred_mld, 0)   # physical constraint
+
 # Predict smoothed values for all dates
-pred_mld <- predict(fit_mld, as.numeric(dat_prof$date))$y
+#pred_mld <- predict(fit_mld, as.numeric(dat_prof$date))$y
 pred_zeu <- predict(fit_zeu, as.numeric(dat_prof$date))$y
 
 
@@ -53,7 +63,7 @@ dat_prof <- dat_prof %>%
 
 ggplot(dat_prof)+
   geom_line(aes(x = date, y = -mld_smooth, color = "MLD"))+
-  geom_point(aes(x = date, y = -mld_smooth), shape = 1)+
+  geom_point(aes(x = date, y = -MLD), shape = 1)+
   geom_line(aes(x = date, y = -zeu_smooth, color = "Zeu"))+
   labs(y = "Depth (m)", color = "Parameter")+
   theme_minimal()
@@ -126,14 +136,18 @@ dat_smoothed <- dat %>%
   ungroup() |> 
   filter(date_10day %in% time_grid$date_10day)
 
-ggplot(dat_smoothed)+
-  geom_point(aes(x = nitrate, y = - depth, color = date_10day))
+#ggplot(dat_smoothed)+
+#  geom_point(aes(x = nitrate, y = - depth, color = date_10day))
 #ggsave("Output/nitrate_profiles_icb.png", width = 8, height = 6)
 dat_smoothed <- dat_smoothed |> 
   left_join(prof_dat_smoothed, by = "date_10day") |> 
   na.omit()
 
-
+ggplot(dat_smoothed)+
+  geom_raster(aes(x = date_10day, y = -depth, fill = nitrate))+
+  geom_line(aes(x = date_10day, y = - mld), color = "white")+
+  scale_fill_viridis_c()+
+  ylim(c(-500, 0))
 # Integration of nitrate over integration depth ---------------------------
 
 dat_final <- dat_smoothed |>
@@ -196,16 +210,331 @@ ncp_results <- ncp_results |>
          ncp_sd = rollapply(NCP, width = 6, FUN = sd, align = "center", fill = NA),
          ncp_signif = rollapply(ncp_smooth, width = 6, FUN = mean, align = "center", fill = NA)) %>% 
   mutate(integration = case_when(zeu > mld ~ "zeu",
-                                 TRUE ~ "mld"),
-         float_wmo = 3902681)
+                                 TRUE ~ "mld"))
 
 peak_ncp_date = ncp_results %>% filter(ncp_smooth == max(ncp_smooth, na.rm = TRUE))
+
+ncp_results = filter(ncp_results, !is.na(NCP)) %>% 
+  mutate(datenum = as.numeric(date_10day))
+
+ncp_results <- ncp_results %>% 
+  mutate(NCP= case_when(NCP < -60 ~ NCP /2,
+                        TRUE ~ NCP))
+
+fit <- loess(NCP ~datenum, data = ncp_results, span = 0.4, family = "symmetric")
+
+ncp_results$loess_ncp = predict(fit)
 
 ggplot(ncp_results)+
   geom_line(aes(x = date_10day, y = NCP, color = "Raw 5 days NCP"), alpha = 0.8)+
   geom_line(aes(x = date_10day, y = ncp_smooth, color = "30 days avg"), linewidth = 1.5)+
   geom_ribbon(aes(x = date_10day, ymin = ncp_smooth - ncp_sd, ymax = ncp_smooth + ncp_sd), alpha = 0.2)+
-  geom_line(aes( x = date_10day, y = ncp_signif, color = "double avg"), linewidth = 1.5)+
+  geom_line(aes( x = date_10day, y = loess_ncp, color = "Loess"), linewidth = 1.5)+
+  scale_color_brewer(palette = "Set1")+
+  labs(y = "mmol C m-2 d-1")+
+  theme_bw()+
+  scale_x_date(date_labels = "%b %Y", breaks = "6 months")+
+  xlab("Date")+
+  ggtitle("NCP estimates from Nitrate drawdown\npredicted from CANYON-B applied on productivity float DOXY observation")
+
+
+
+# plotting Nathan outputs -------------------------------------------------
+
+o2_net_change <- read_csv("Data/Processed/O2_float_net_change.csv")%>% 
+  mutate(date = as.POSIXct((mtime - 719529) * 86400, origin = "1970-01-01", tz = "UTC"),
+         datenum = as.numeric(date),
+         o2_net_smooth = rollapply(Int_dO2dt_40m_mmol_m2_d/2, width = 6, FUN = mean, align = "center", fill = NA)) %>% 
+  na.omit()
+
+
+fit <- loess(o2_net_smooth~datenum, data = o2_net_change, span = 0.2, family = "symmetric")
+
+o2_net_change$o2_net_change = predict(fit)
+
+o2_float_night_loss <- read_csv("Data/Processed/O2_float_night_loss.csv")%>% 
+  mutate(date = as.POSIXct((mtime - 719529) * 86400, origin = "1970-01-01", tz = "UTC"),
+         datenum = as.numeric(date),
+         o2_night_smooth = rollapply(Int_O2_loss_40m_mmol_m2_d/2, width = 10, FUN = mean, align = "center", fill = NA)) %>% 
+  na.omit()
+
+
+fit <- loess(o2_night_smooth~datenum, data = o2_float_night_loss, span = 0.2, family = "symmetric")
+
+o2_float_night_loss$o2_night_change = predict(fit)
+
+
+npp <- read_csv("Data/Processed/icb_npp_ncp.csv") %>% 
+  mutate(npp = npp/12,
+         datenum = as.numeric(date_10day)) %>% 
+  na.omit()
+
+ggplot(ncp_results) +
+  # NCP pair
+  geom_line(aes(x = date_10day, y = NCP,
+                color = "NCP light"), alpha = 0.8) +
+  geom_line(aes(x = date_10day, y = loess_ncp,
+                color = "NCP dark"), linewidth = 1) +
+  
+  # O2 NIGHT CHANGE pair
+  geom_line(aes(x = date, y = o2_night_smooth,
+                color = "O2 night light"),
+            data = o2_float_night_loss, alpha = 0.8) +
+  geom_line(aes(x = date, y = o2_night_change,
+                color = "O2 night dark"),
+            data = o2_float_night_loss, linewidth = 1) +
+  
+  # O2 NET CHANGE pair
+  geom_line(aes(x = date, y = o2_net_smooth,
+                color = "O2 net light"),
+            data = o2_net_change, alpha = 0.8) +
+  geom_line(aes(x = date, y = o2_net_change,
+                color = "O2 net dark"),
+            data = o2_net_change, linewidth = 1) +
+  
+  #NPP
+  geom_line(aes(x = date_10day, y = npp, color = "NPP"), data = npp)+
+  
+  
+  # ---- COLOR MANUAL WITH MATCHING PAIRS ----
+scale_color_manual(
+  name = "",
+  values = c(
+    # NCP
+    "NCP light"     = "#6baed6",
+    "NCP dark"      = "#08519c",
+    "NCP dark2" = "#810f7c",
+    
+    # O2 NIGHT CHANGE
+    "O2 night light" = "#fc9272",
+    "O2 night dark"  = "#cb181d",
+    
+    # O2 NET CHANGE
+    "O2 net light"   = "#31a354",
+    "O2 net dark"    = "#006837",
+    "NPP" = "#252525"
+  ),
+  labels = c(
+    "NCP light"        = "NCP (30 days avg)",
+    "NCP dark"         = "NCP (loess)",
+    "NCP dark2" = "NCP (other floats)",
+    "O2 night light"   = "O2 night change (30 days avg)",
+    "O2 night dark"    = "O2 night change (loess)",
+    "O2 net light"     = "O2 net change (18 days avg)",
+    "O2 net dark"      = "O2 net change (loess)",
+    "NPP" = "NPP (other floats)"
+    )
+  ) +
+  labs(y = "mmol C m-2 d-1") +
+  theme_bw() +
+  scale_x_date(date_labels = "%b %Y", breaks = "3 months") +
+  xlab("Date") +
+  ggtitle("NCP estimation compared to net and night O2 changes")
+
+ggsave("Output/productivity_time_series_total.png", width = 10, height = 6)
+
+
+# NAB08 data --------------------------------------------------------------
+
+nab <- read_csv("Data/Processed/NAB08_PP.csv")%>% 
+  mutate(date = as.POSIXct((mtime - 719529) * 86400, origin = "1987-01-01", tz = "UTC"))
+
+
+ggplot(ncp_results) +
+  # NCP pair
+  geom_line(aes(x = date_10day, y = NCP,
+                color = "NCP light"), alpha = 0.5, linetype = "dashed") +
+  geom_line(aes(x = date_10day, y = loess_ncp,
+                color = "NCP dark"), alpha = 0.5, linetype = "dashed") +
+  
+  geom_line(aes(x = date, y = NPP_mmol_m2, color = "NPP"), data = nab)+
+  
+  # O2 NIGHT CHANGE pair
+  geom_line(aes(x = date, y = o2_smooth,
+                color = "O2 night light"),
+            data = o2_float_night_loss, alpha = 0.5, linetype = "dashed") +
+  geom_line(aes(x = date, y = o2_night_change,
+                color = "O2 night dark"),
+            data = o2_float_night_loss, alpha = 0.5, linetype = "dashed") +
+  
+  # O2 NET CHANGE pair
+  geom_line(aes(x = date, y = o2_smooth,
+                color = "O2 net light"),
+            data = o2_net_change, alpha = 0.5, linetype = "dashed") +
+  geom_line(aes(x = date, y = o2_net_change,
+                color = "O2 net dark"),
+            data = o2_net_change, alpha = 0.5, linetype = "dashed") +
+  geom_line(aes(x = date, y = GPP_mmol_m2, color = "NCP dark2"), data = nab)+
+  
+  #NPP
+  geom_line(aes(x = date_10day, y = npp, color = "NPP"), data = npp, linetype = "dashed", alpha = 0.5)+
+  
+  
+  # ---- COLOR MANUAL WITH MATCHING PAIRS ----
+scale_color_manual(
+  name = "",
+  values = c(
+    # NCP
+    "NCP light"     = "#6baed6",
+    "NCP dark"      = "#08519c",
+    "NCP dark2" = "#810f7c",
+    
+    # O2 NIGHT CHANGE
+    "O2 night light" = "#fc9272",
+    "O2 night dark"  = "#cb181d",
+    
+    # O2 NET CHANGE
+    "O2 net light"   = "#31a354",
+    "O2 net dark"    = "#006837",
+    "NPP" = "#252525"
+  ),
+  labels = c(
+    "NCP light"        = "NCP (30 days avg)",
+    "NCP dark"         = "NCP (loess)",
+    "NCP dark2" = "GPP NAB08",
+    "O2 night light"   = "O2 night change (30 days avg)",
+    "O2 night dark"    = "O2 night change (loess)",
+    "O2 net light"     = "O2 net change (18 days avg)",
+    "O2 net dark"      = "O2 net change (loess)",
+    "NPP" = "NPP NAB08"
+  )
+) +
+  labs(y = "mmol C m-2 d-1") +
+  theme_bw() +
+  scale_x_date(date_labels = "%b %Y", breaks = "3 months") +
+  xlab("Date") +
+  ggtitle("NCP estimation compared to net and night O2 changes")+
+  xlim(as.Date("2025-03-01"), as.Date("2025-07-01"))
+
+  ggsave("Output/productivity_time_series_compared_nab08_zoomed.png", width = 10, height = 6)
+  
+ggplot(nab)+
+  geom_point(aes(x = NPP_mmol_m2, y = GPP_mmol_m2))+
+  geom_abline(intercept = 0, slope = 1)
+
+o2_tot <- full_join(o2_float_night_loss, o2_net_change)
+
+
+#na pparox o2_net_change and o2_night_smooth
+o2_tot <- o2_tot %>% 
+  arrange(datenum) %>% 
+  select(date, datenum, o2_net_smooth, o2_night_smooth) %>% 
+  mutate(o2_net_smooth = na.approx(o2_net_smooth, date, na.rm = FALSE),
+         o2_night_smooth = na.approx(o2_night_smooth, date, na.rm = FALSE)) %>% 
+  na.omit() %>% 
+  mutate(GPP = o2_net_smooth + o2_night_smooth)
+         
+
+ggplot()+
+  geom_line(aes(x = date, y = GPP, color = "GPP"), data = o2_tot)+
+  geom_line(aes(x = date_10day, y = npp, color = "NPP"), data = npp)+
+  labs(y = "mmol C m-2 d-1") +
+  theme_bw() +
+  scale_x_date(date_labels = "%b %Y", breaks = "3 months") +
+  xlab("Date") 
+
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Prepare data: keep distinct point locations and extract month
+dat2 <- dat %>%
+  select(date, lon, lat) %>%
+  distinct() %>%
+  mutate(month = month(date))   # abbreviated month label
+
+# Calculate bounding box around your points, with a small margin
+lon_range <- range(dat2$lon, na.rm = TRUE)
+lat_range <- range(dat2$lat, na.rm = TRUE)
+
+lon_margin <- diff(lon_range) * 0.1
+lat_margin <- diff(lat_range) * 0.1
+
+ggplot() +
+  geom_sf(data = world, fill = "gray95", color = "black") +
+  geom_point(
+    data = dat2,
+    aes(x = lon, y = lat, colour = month),
+    size = 2
+  ) +
+  scale_color_viridis_c()+
+  coord_sf(
+    xlim = c(lon_range[1] - lon_margin, lon_range[2] + lon_margin),
+    ylim = c(lat_range[1] - lat_margin, lat_range[2] + lat_margin),
+    expand = FALSE
+  ) +
+  theme_minimal() +
+  labs(colour = "Month")
+
+ggsave("Output/productivity_floaat.png", width = 10, height = 6)
+
+# statistical analysis ----------------------------------------------------
+
+ggplot(ncp_results)+ 
+  geom_line(aes( x = date_10day, y = loess_ncp, color = "Loess"), linewidth = 1.5)+
+  scale_color_brewer(palette = "Set1")+
+  labs(y = "mmol C m-2 d-1")+
+  theme_bw()+
+  scale_x_date(date_labels = "%b %Y", breaks = "6 months")+
+  xlab("Date")+
+  ggtitle("NCP estimates from Nitrate drawdown\npredicted from CANYON-B applied on productivity float DOXY observation")
+
+library(forecast)
+
+ts_data <- ts(ncp_results$loess_ncp, frequency = 73)
+fit <- mstl(ts_data)
+autoplot(fit)
+
+ncp_results$seasonal <- fit[, 2]
+
+model = lm(seasonal~date_10day, data = ncp_results)
+summary(model)
+
+ggplot(ncp_results)+ 
+  geom_line(aes( x = date_10day, y = loess_ncp, color = "Loess"), linewidth = 1.5)+
+  geom_abline(intercept = 88.13, slope = -0.0046)+
+  scale_color_brewer(palette = "Set1")+
+  labs(y = "mmol C m-2 d-1")+
+  theme_bw()+
+  scale_x_date(date_labels = "%b %Y", breaks = "6 months")+
+  xlab("Date")+
+  ggtitle("NCP estimates from Nitrate drawdown\npredicted from CANYON-B applied on productivity float DOXY observation")
+
+
+ggplot(ncp_results)+
+  geom_line(aes(x = date_10day, y = NCP, color = "Raw 5 days NCP"), alpha = 0.8)+
+  geom_line(aes(x = date_10day, y = ncp_smooth, color = "30 days avg"), linewidth = 1.5)+
+  geom_ribbon(aes(x = date_10day, ymin = ncp_smooth - ncp_sd, ymax = ncp_smooth + ncp_sd), alpha = 0.2)+
+  geom_line(aes( x = date_10day, y = seasonal, color = "Loess"), linewidth = 1.5)+
+  scale_color_brewer(palette = "Set1")+
+  labs(y = "mmol C m-2 d-1")+
+  theme_bw()+
+  scale_x_date(date_labels = "%b %Y", breaks = "6 months")+
+  xlab("Date")+
+  ylim(c(-100, 100))+
+  ggtitle("NCP estimates from Nitrate drawdown\npredicted from CANYON-B applied on productivity float DOXY observation")
+
+synthetic_ncp <- ncp_results |> 
+  mutate(month_of_year = yday(date_10day)) |> 
+  group_by(month_of_year) |> 
+  summarise(mean_ncp = mean(NCP, na.rm = TRUE),
+            sd_ncp = sd(NCP, na.rm = TRUE))
+
+ggplot(synthetic_ncp)+
+  geom_line(aes(x = month_of_year, y = mean_ncp, color = "NCP"))+
+  geom_ribbon(aes(x = month_of_year, ymin = mean_ncp - sd_ncp, ymax = mean_ncp + sd_ncp), alpha = 0.2)+
+  labs(x = "Month", y = "mmol C m-2 d-1", color = "Variable")+
+  scale_x_continuous(breaks = 1:12, labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))+
+  theme_bw()+
+  xlim(1,12.1)
+
+
+ggplot(ncp_results)+
+  geom_line(aes(x = date_10day, y = NCP, color = "Raw 5 days NCP"), alpha = 0.8)+
+  #geom_line(aes(x = date_10day, y = ncp_smooth, color = "30 days avg"), linewidth = 1.5)+
+  #geom_ribbon(aes(x = date_10day, ymin = ncp_smooth - ncp_sd, ymax = ncp_smooth + ncp_sd), alpha = 0.2)+
+  geom_line(aes( x = date_10day, y = loess_ncp, color = "Loess"), linewidth = 1.5)+
   geom_curve(aes(x = peak_ncp_date$date_10day + 50, y = peak_ncp_date$ncp_smooth + 50, xend = peak_ncp_date$date_10day, yend = peak_ncp_date$ncp_smooth),
              arrow = arrow(length = unit(0.3, "cm"), type = "closed"),
              color = "black",
@@ -244,6 +573,8 @@ ggplot(ncp_results)+
   xlab("Date")+
   ylim(c(-100, 100))+
   ggtitle("NCP estimates from Nitrate drawdown\npredicted from CANYON-B applied on productivity float DOXY observation\nzoomed on Y axis to visually remove outliers")
+
+
 ggplot(ncp_results)+
   geom_line(aes(x = date_10day, y = ncp_smooth, color = integration, group = float_wmo), linewidth = 1.5)+
   geom_line(aes(x = date_10day, y = ncp_signif, color = "cleaned", group = float_wmo), linewidth = 1.5)+

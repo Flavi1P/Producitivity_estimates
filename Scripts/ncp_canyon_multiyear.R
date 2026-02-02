@@ -384,6 +384,7 @@ ncp_results$trend <- fit[, 2]
 ncp_results <- ncp_results %>% mutate(clean_ncp = trend + seasonal,
                                       trend_noise = trend + noise)
 
+write_csv(ncp_results, "Data/Processed/ncp_results.csv")
 model = lm(trend_noise~date_10day, data = ncp_results)
 summary(model)
 
@@ -399,7 +400,7 @@ ggplot(ncp_results)+
     linewidth = 0.5
   ) +
   geom_point(aes(x = date_10day, y = ncp_smooth, color = "Raw, 21 days smoothed NCP"))+
-  geom_line(aes( x = date_10day, y = clean_ncp, color = "Seasonal signal + noise"), linewidth = 1.5)+
+  geom_line(aes( x = date_10day, y = clean_ncp, color = "Raw - noise"), linewidth = 1.5)+
   scale_color_brewer(palette = "Set1")+
   geom_hline(yintercept = 0) +
   labs(y = "mmol C m-2 d-1") +
@@ -499,6 +500,17 @@ synthetic_ncp <- ncp_results |>
 ggplot(synthetic_ncp)+
   geom_line(aes(x = month_of_year, y = mean_ncp, color = "NCP"))+
   geom_ribbon(aes(x = month_of_year, ymin = mean_ncp - sd_ncp, ymax = mean_ncp + sd_ncp), alpha = 0.2)+
+  labs(x = "Month", y = "mmol C m-2 d-1", color = "Variable")+
+  scale_x_continuous(breaks = 1:12, labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))+
+  theme_bw()+
+  xlim(1,12.1)
+
+export <- read_csv("Data/Processed/ICB_flux_climatology 1.csv")
+
+ggplot(synthetic_ncp)+
+  geom_line(aes(x = month_of_year, y = mean_ncp, color = "NCP"))+
+  geom_ribbon(aes(x = month_of_year, ymin = mean_ncp - sd_ncp, ymax = mean_ncp + sd_ncp), alpha = 0.2)+
+  geom_line(aes(x = month, y = F100_mmol_m2_d, color = "Export"), data = export)+
   labs(x = "Month", y = "mmol C m-2 d-1", color = "Variable")+
   scale_x_continuous(breaks = 1:12, labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))+
   theme_bw()+

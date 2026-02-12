@@ -127,6 +127,7 @@ def cbpm_argo(chl_z,Cphyto_z,irr,year,month,day,lat):
         
         chlC_z[z] = chl_z[z] / Cphyto_z[z]
         chlCarbonMax_z = 0.022 + (0.045-0.022) * np.exp(-3.0 * par_z[z] / Daylength)
+        
         nutTempFunc_z[z] = (chlC_z[z] - y0) / (chlCarbonMax_z - y0)
         if nutTempFunc_z[z] > 1: 
             nutTempFunc_z[z] = 1

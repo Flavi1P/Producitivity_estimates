@@ -50,3 +50,8 @@ rsconnect/
 
 #Data files
 Data/
+
+Output/
+CLaude.md
+.claude/
+*.pdf

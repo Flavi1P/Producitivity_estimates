@@ -4,20 +4,23 @@ library(castr)
 library(zoo)
 
 dat <- read_csv2("Data/Processed/productivity_float_with_canyon.csv")
+dat <- read_csv("~/ncp_from_canyon/data/NorthAtlantic_test/intermediate/merged/merged_ncp.csv")
+
+time_step = "15 days"
 
 # filter the dataset to stay with ICB -------------------------------------
 #add iceland contour on map
 
 ggplot(select(dat, lon, lat) |> distinct())+
   geom_point(aes(x = lon, y = lat))+
-  geom_rect(aes(xmin = -45, xmax = -10, ymin = 58, ymax = 65), fill = NA, color = "red")+
+  geom_rect(aes(xmin = -40, xmax = -10, ymin = 58, ymax = 65), fill = NA, color = "red")+
   theme_minimal()+#add land contour
   borders("world", xlim = c(-60, 0), ylim = c(50, 70), fill = "lightgrey", color = "black")+
   coord_quickmap(xlim = c(-55, - 10), ylim = c(50, 65))
 
-ggsave("Output/float_locations_icb.png", width = 8, height = 6)
+#ggsave("Output/float_locations_icb.png", width = 8, height = 6)
 dat <- filter(dat, lon >= -40 & lon <= -10 & lat >= 58 & lat <= 65) %>% 
-  mutate(float_wmo = "prodctivity_float")
+  filter(date > "2023-01-01" & date < "2024-01-01")
 range(dat$date)
 
 # MLD and Zeu time series -------------------------------------------------
@@ -86,10 +89,10 @@ integration_depth_data <- dat |>
 #Regrid the data on a 10day interval timeseries
 time_grid <- tibble(date_10day = seq(min(integration_depth_data$date),
                                      max(integration_depth_data$date),
-                                     by = "5 days"))
+                                     by = time_step))
 
 prof_dat_smoothed <- integration_depth_data %>%
-  mutate(date_10day = as.Date(cut(date, breaks = "5 days"))) %>%
+  mutate(date_10day = as.Date(cut(date, breaks = time_step))) %>%
   group_by(date_10day) %>%
   summarise(mld = mean(mld_smooth, na.rm = TRUE),
             zeu = mean(zeu_smooth, na.rm = TRUE)) |> 
@@ -123,7 +126,7 @@ prof_dat_smoothed <- na.omit(prof_dat_smoothed)
 
 #Create a dataset with the median value of nitrate integrals every 10 days for smoothing
 dat_smoothed <- dat %>%
-  mutate(date_10day = as.Date(cut(date, breaks = "5 days"))) %>%
+  mutate(date_10day = as.Date(cut(date, breaks = time_step))) %>%
   group_by(date_10day, depth) %>%
   summarise(
     nitrate = mean(canyon_nitrate, na.rm = TRUE)) |> 
@@ -182,8 +185,9 @@ dat_final_smoothed <- dat_final %>%
   )
 
 ggplot(dat_final_smoothed)+
-  geom_line(aes(x = date_10day, y = int_N_mmol_m2), linetype = "dashed")+
+  geom_line(aes(x = date_10day, y = next_int_N_smooth), linetype = "dashed")+
   geom_line(aes(x = date_10day, y = int_N_smooth))+
+  geom_point(aes(x = date_10day, y = int_N_smooth))+
   labs(y = "Integrated Nitrate (mmol N m-2)")+
   theme_minimal()+
   scale_x_date(date_labels = "%b %Y", breaks = "2 months")+
@@ -227,9 +231,9 @@ ncp_results$loess_ncp = predict(fit)
 
 ggplot(ncp_results)+
   geom_line(aes(x = date_10day, y = NCP, color = "Raw 5 days NCP"), alpha = 0.8)+
-  geom_line(aes(x = date_10day, y = ncp_smooth, color = "30 days avg"), linewidth = 1.5)+
-  geom_ribbon(aes(x = date_10day, ymin = ncp_smooth - ncp_sd, ymax = ncp_smooth + ncp_sd), alpha = 0.2)+
-  geom_line(aes( x = date_10day, y = loess_ncp, color = "Loess"), linewidth = 1.5)+
+  #geom_line(aes(x = date_10day, y = ncp_smooth, color = "30 days avg"), linewidth = 1.5)+
+  #geom_ribbon(aes(x = date_10day, ymin = ncp_smooth - ncp_sd, ymax = ncp_smooth + ncp_sd), alpha = 0.2)+
+  #geom_line(aes( x = date_10day, y = loess_ncp, color = "Loess"), linewidth = 1.5)+
   scale_color_brewer(palette = "Set1")+
   labs(y = "mmol C m-2 d-1")+
   theme_bw()+

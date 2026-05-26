@@ -3,6 +3,7 @@ library(dplyr)
 library(tidyr)
 library(lubridate)
 library(zoo)
+library(readr)
 
 # open the Sprof NetCDF
 #nc <- nc_open("Data/Raw/Floats/3901586_Sprof.nc")
@@ -12,7 +13,8 @@ files <- list.files("Data/Raw/Doxy_floats/", pattern = "_Sprof.nc", full.names =
 
 which(files == "Data/Raw/Doxy_floats/6901489_Sprof.nc")
 
-files = files[140:length(files)]
+files = files[242:length(files)]
+files = "~/ncp_from_canyon/data/NorthAtlantic_test/raw/6903041_Sprof.nc"
 pb <- txtProgressBar(min = 0, max = length(files), style = 3)
 i <- 0
 
@@ -123,5 +125,21 @@ for(file in files){
 
 close(pb)
 
-ggplot(t)+
+library(ggplot2)
+ggplot(df_interp)+
+  geom_point(aes(x = oxygen, y = -depth))
+
+test <- read_csv("~/ncp_from_canyon/data/NorthAtlantic_test/intermediate/doxy_profiles/argo_6903041_interp.csv")
+
+df_nona <- df_interp %>% filter(!is.na(oxygen))
+test_nona <- test %>% filter(!is.na(oxygen))
+
+comparison <- full_join(df_nona, test_nona, by = c("date", "depth"), suffix = c("r", "python"))
+
+ggplot(comparison)+
+  geom_point(aes(x = oxygenr, y = oxygenpython))
+
+ggplot()+
+  geom_point(aes(x = df_nona$oxygen, y = test_nona$oxygen))
+ggplot(test)+
   geom_point(aes(x = oxygen, y = -depth))

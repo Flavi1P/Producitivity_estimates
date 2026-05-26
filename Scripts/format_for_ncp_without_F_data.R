@@ -8,6 +8,8 @@ source("Scripts/cbpm_r/cbpm_argo.r")
 source("Scripts/cbpm_r/despike.r")
 
 files <- list.files("Data/Intermediate/Full_doxy_db/", full.names = TRUE)
+files <- list.files("~/ncp_from_canyon/data/NorthAtlantic_test/intermediate/nitrate_profiles/", full.names = TRUE)
+
 
 dat <- data.frame()
 for(file in files){
@@ -40,8 +42,10 @@ dat_all_pp <- left_join(dat, prof_dat)
 
 ggplot(select(dat_all_pp, float_wmo, lon, lat, date) |> distinct())+
   geom_point(aes(x = lon, y = lat, color= date))+
-  geom_rect(aes(xmin = -45, xmax = -10, ymin = 58, ymax = 65), fill = NA, color = "red")+
+  geom_rect(aes(xmin = -45, xmax = -10, ymin = 58, ymax = 65), fill = NA, color = "red")+ #here it should be the coordinates stated in the yml file
   coord_quickmap()
+
+merged_data_for_ncp <- dat_all_pp %>% select(float_wmo, prof_number, date, lon, lat, date, canyon_nitrate, sa, ct, sigma0, MLD, sal, oxygen)
   
 
 data_to_share <- dat_all_pp |> 

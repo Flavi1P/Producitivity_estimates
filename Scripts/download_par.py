@@ -7,9 +7,18 @@ output_dir = "C:/Users/petit/Documents/Producitivity_estimates/Data/Raw/Satellit
 os.makedirs(output_dir, exist_ok=True)  # Create the directory if it doesn't exist
 
 # List of URLs to download
+#
+# For each new cruise/period, generate a manifest at
+#   https://oceancolor.gsfc.nasa.gov/l3
+# selecting: AQUA-MODIS, L3m, daily, PAR (or x_par), date range, region bbox.
+# The portal emails a `requested_files_*.tar` URL — paste it below.
+#
+# Pending for DY180 (May-Jun 2024, lat 56-62 N, lon -34 to -15 W):
+#   - manifest scope: 2024-05-25..2024-06-23 daily PAR (or x_par)
+#   - drop into the list below, run this script, then untar into PAR_DIR.
 urls = [
     "https://oceandata.sci.gsfc.nasa.gov/cgi/getfile/requested_files_1.tar?h=ocdist408&p=/data1/60200244af799f6f/requested_files",
-    # Add more URLs here
+    # TODO(DY180 2024-05/06): paste new manifest URL here
 ]
 
 # Function to download a single file

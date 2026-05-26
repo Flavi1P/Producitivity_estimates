@@ -13,7 +13,7 @@ argo = ArgoDataFetcher(progress = True)
 
 # North Atlantic bounding box
 ds = (
-    argo.region([-40, -10, 58, 65, 0, 2000, "2019-01", "2019-02"])
+    argo.region([-40, -10, 58, 65, 0, 2000, "2019-01", "2021-02"])
         .to_xarray()
 )
 

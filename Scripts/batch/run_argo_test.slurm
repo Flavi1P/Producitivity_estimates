@@ -2,6 +2,9 @@
 #SBATCH --job-name=argo_test
 #SBATCH --time=02:00:00
 #SBATCH --mem=16G
+#SBATCH --account=shobu
+#SBATCH --qos=debug
+#SBATCH --partition=debug
 #SBATCH --cpus-per-task=2
 #SBATCH --output=logs/argo_test.out
 #SBATCH --error=logs/argo_test.err

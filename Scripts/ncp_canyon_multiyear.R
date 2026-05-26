@@ -357,7 +357,36 @@ geom_vline(
 
 ggsave("Output/ncp_ts_with_o2budget.png", width = 14, height = 8)
 
+ggplot(ncp_results) +
+  # ---- YEAR SEPARATORS ----
+geom_vline(
+  xintercept = year_lines,
+  linetype = "dashed",
+  color = "grey40",
+  linewidth = 0.5
+) +
+  
+  # NCP pair
+  geom_line(aes(x = date_10day, y = NCP,
+                color = "NCP light"), alpha = 0.8) +
+  geom_line(aes(x = date_10day, y = ncp_smooth,
+                color = "NCP dark"), linewidth = 1) +
+  scale_color_manual(
+    name = "",
+    values = c(
+      "NCP light"     = "#6baed6",
+      "NCP dark"      = "#08519c"),
+    labels = c(
+      "NCP light"        = "Raw NCP",
+      "NCP dark"         = "21 days running average")) +
+  geom_hline(yintercept = 0) +
+  labs(y = "mmol C m-2 d-1") +
+  theme_bw() +
+  scale_x_date(date_labels = "%b\n%Y", breaks = "6 months")+
+  xlab("Date") +
+  ggtitle("NCP estimation from nitrate drawdown")
 
+ggsave("Output/ncp_ts_raw_smooth.png", width = 14, height = 8)
 # statistical analysis ----------------------------------------------------
 
 ggplot(ncp_results)+ 
@@ -372,7 +401,7 @@ ggplot(ncp_results)+
 library(forecast)
 
 ts_data <- ts(ncp_results$ncp_smooth, frequency = 73)
-fit <- mstl(ts_data, robust = TRUE)
+fit <- mstl(ts_data)
 autoplot(fit)
 
 ggsave("STL.png", width = 12, height = 8)
@@ -392,24 +421,19 @@ ggplot(ncp_results)+
   geom_point(aes(x = date_10day, y = trend_noise))+
   geom_abline(intercept = 25.7, slope = -0.001023)
 
-ggplot(ncp_results)+ 
-  geom_vline(
-    xintercept = year_lines,
-    linetype = "dashed",
-    color = "grey40",
-    linewidth = 0.5
-  ) +
+ggplot(ncp_results) +
   geom_point(aes(x = date_10day, y = ncp_smooth, color = "Raw, 21 days smoothed NCP"))+
   geom_line(aes( x = date_10day, y = clean_ncp, color = "Raw - noise"), linewidth = 1.5)+
-  scale_color_brewer(palette = "Set1")+
+  scale_color_brewer(palette = "Set1", name = "")+
   geom_hline(yintercept = 0) +
   labs(y = "mmol C m-2 d-1") +
-  theme_bw() +
-  scale_x_date(date_labels = "%b\n%Y", breaks = "6 months")+
-  xlab("Date") +
-  ggtitle("NCP estimates from Nitrate drawdown\npredicted from CANYON-B applied on float DOXY observation in North Atlantic")
+  theme_bw(base_size = 18) +
+  scale_x_date(date_labels = "%Y", breaks = "12 months")+
+  xlab("") +
+  ggtitle("NCP estimates from Nitrate drawdown\npredicted from CANYON-B applied on float DOXY observations in North Atlantic")
 
-ggsave("Output/ncp_ts_STL.png", width = 14, height = 8)
+
+ggsave("Output/ncp_ts_STL.png", width = 17, height = 10)
 
 library(nlme)
 

@@ -128,10 +128,12 @@ def main() -> int:
     ap.add_argument("--end", type=str, default=None,
                     help="End date (YYYY-MM-DD), inclusive.")
     ap.add_argument("--out", type=Path, default=OUT_FILE)
+    ap.add_argument("--input", type=Path, default=BGC_FILE,
+                    help="Override input NetCDF (default: small-extent file).")
     args = ap.parse_args()
 
-    print(f"Loading {BGC_FILE.name}")
-    ds = xr.open_dataset(BGC_FILE)[["chl", "bbp", "PAR"]]
+    print(f"Loading {args.input.name}")
+    ds = xr.open_dataset(args.input)[["chl", "bbp", "PAR"]]
     src_depth = ds["depth"].values.astype(np.float32)
 
     print("Aggregating weekly -> monthly mean")

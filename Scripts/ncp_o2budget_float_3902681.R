@@ -10,7 +10,7 @@ library(lubridate)
 library(zoo)
 
 # --- NCP (nitrate drawdown, 20-day window) for float 3902681 ----------------
-ncp_results <- read_csv("Data/Processed/ncp_float_3902681_30d.csv") %>%
+ncp_results <- read_csv("Data/Processed/ncp_float_smoothed_30d.csv") %>%
   mutate(date = as.Date(date)) %>%
   arrange(date) %>%
   filter(!is.na(NCP))
@@ -95,7 +95,8 @@ ggplot(ncp_results) +
   labs(y = expression(mmol~C~m^-2~d^-1), x = "Date") +
   theme_bw() +
   scale_x_date(date_labels = "%b %Y", breaks = "3 months") +
+  ylim(-100, 175)+
   ggtitle("Float 3902681: NCP and NPP with diel O2 budget (net & night change)")
 
-ggsave("Output/ncp_o2budget_float_3902681.png", width = 11, height = 6, dpi = 200)
+ggsave("Output/ncp_o2budget_float_3902681_v2.png", width = 11, height = 6, dpi = 200)
 cat("saved -> Output/ncp_o2budget_float_3902681.png\n")

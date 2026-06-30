@@ -79,7 +79,14 @@ era5_at <- function(t0, t1, lon0, lat0) {
   kt <- which(e_t >= t0 & e_t <= t1)
   if (length(kt) == 0) kt <- which.min(abs(as.numeric(e_t - (t0 + (t1 - t0) / 2))))
   u <- e_u10[i, j, kt]; v <- e_v10[i, j, kt]; m <- e_msl[i, j, kt]
-  list(u2 = mean(u^2 + v^2, na.rm = TRUE), msl = mean(m, na.rm = TRUE))
+  spd <- sqrt(u^2 + v^2)
+  # spd = vector of hourly 10-m wind speeds over the interval. The bubble flux
+  # (Liang 2013) is strongly nonlinear in wind (~u*^3.86), so it is evaluated at
+  # each hourly step in airsea_flux() and then averaged, rather than applying the
+  # formula to a single interval-mean wind. <U2> stays the interval mean of the
+  # squared wind (correct for the quadratic W2014 diffusive k).
+  list(u2 = mean(u^2 + v^2, na.rm = TRUE), msl = mean(m, na.rm = TRUE),
+       spd = spd[is.finite(spd)])
 }
 
 n_prof <- length(juld)
@@ -96,6 +103,19 @@ grid <- 0:40
 # which is exactly why deep winter pairs are the least certain.
 SIG_O2 <- 1.0   # mmol O2 m-3
 
+# Bubble-mediated flux (Liang et al. 2013) constants. XG_O2 = mole fraction of
+# O2 in dry air; RHO_AIR = reference air density (kg m-3). See airsea_flux().
+XG_O2   <- 0.20946
+RHO_AIR <- 1.225
+
+# Saturation water-vapour pressure over seawater (Weiss & Price 1980), in atm.
+# Used for the L13 sea-level-pressure correction slpc (assumes RH = 1 at the
+# sea surface, the fas_L13 default).
+vpress_atm <- function(S, Tc) {
+  TK <- Tc + 273.15
+  exp(24.4543 - 67.4509 * (100 / TK) - 4.8489 * log(TK / 100) - 0.000544 * S)
+}
+
 # DOXY_ADJUSTED_QC comes back as a character vector of length N_PROF, each
 # element being an N_LEVELS-long string (one flag char per level).
 parse_qc_col <- function(qc_entry, n_levels) {
@@ -111,6 +131,8 @@ mld_vec       <- rep(NA_real_, n_prof)   # mixed-layer depth, m (castr, sigma0 0
 o2_surf_vec <- rep(NA_real_, n_prof)   # surface O2 inventory mean, mmol m-3
 o2_eq_vec   <- rep(NA_real_, n_prof)   # equilibrium O2 at 1 atm, mmol m-3
 sst_vec     <- rep(NA_real_, n_prof)   # surface in-situ temperature, degC
+sss_vec     <- rep(NA_real_, n_prof)   # surface practical salinity (for L13 vpress)
+rho_surf_vec <- rep(NA_real_, n_prof)  # surface in-situ density, kg m-3 (L13 ustar_w)
 
 # Full depth-ordered O2 profile per cast, kept so the MLD-based budget can
 # re-integrate each profile to an arbitrary depth later (the 0-40 m inventory
@@ -171,6 +193,8 @@ for (p in seq_len(n_prof)) {
   if (sum(top) == 0) top <- seq_len(min(3, length(depth)))  # fallback: shallowest
   SA_s  <- mean(SA[top]); CT_s <- mean(CT[top]); rho_s <- mean(rho[top])
   sst_vec[p]    <- mean(tt[top])                              # degC, in-situ
+  sss_vec[p]    <- mean(ss[ord][top])                         # practical salinity
+  rho_surf_vec[p] <- rho_s                                    # kg m-3 (L13 ustar_w)
   o2_surf_vec[p] <- mean(o2_grid[grid <= 10])                 # mmol m-3
   # Garcia & Gordon (1992) solubility via gsw (umol/kg) -> mmol m-3 at 1 atm.
   o2_eq_umolkg  <- gsw_O2sol(SA_s, CT_s, 0, lon[p], lat[p])   # umol/kg
@@ -186,7 +210,9 @@ prof <- tibble(
   mld        = mld_vec,       # mixed-layer depth, m
   o2_surf    = o2_surf_vec,   # surface O2, mmol m-3
   o2_eq      = o2_eq_vec,     # equilibrium O2 at 1 atm, mmol m-3
-  sst        = sst_vec        # surface temperature, degC
+  sst        = sst_vec,       # surface temperature, degC
+  sss        = sss_vec,       # surface practical salinity (L13 vpress)
+  rho_surf   = rho_surf_vec   # surface in-situ density, kg m-3 (L13 ustar_w)
 ) |>
   mutate(
     lst   = (hour(time) + minute(time) / 60 + lon / 15) %% 24,
@@ -234,8 +260,46 @@ airsea_flux <- function(d, i, j) {
   # the pair's two profiles, representing the interval.
   dO2 <- mean(c(d$o2_surf[i], d$o2_surf[j])) - mean(c(o2_eq_p_i, o2_eq_p_j))
   Fas <- -k * dO2                                           # mmol O2 m-2 d-1, +into ocean
+
+  # ---- bubble-mediated flux (Liang et al. 2013) -----------------------------
+  # Added on top of the W2014 diffusive Fas (which is left exactly as above).
+  # Two terms, both +into ocean, evaluated at each hourly ERA5 wind then averaged
+  # over the interval (the flux is strongly nonlinear in wind):
+  #   Fc = large bubbles that fully dissolve -> injects O2 regardless of
+  #        saturation (always >= 0), ~ ustar_w^3.86.
+  #   Fp = small bubbles that partially dissolve -> a saturation-dependent
+  #        exchange against an overpressure-raised target, ~ ustar_w^2.76.
+  # Reference: fas_L13.m, Nicholson gas_toolbox. Sea-level-pressure correction
+  # slpc uses the Weiss & Price (1980) water-vapour term (RH = 1).
+  S_s    <- mean(c(d$sss[i], d$sss[j]))
+  rho_w  <- mean(c(d$rho_surf[i], d$rho_surf[j]))
+  o2eq1  <- mean(c(d$o2_eq[i], d$o2_eq[j]))                 # 1-atm equilibrium, mmol m-3
+  o2surf <- mean(c(d$o2_surf[i], d$o2_surf[j]))             # surface O2, mmol m-3
+  ph2o   <- vpress_atm(S_s, T_s)                            # atm, RH = 1
+  slpc   <- ((w$msl / 101325) - ph2o) / (1 - ph2o)          # dry-pressure ratio
+
+  spd <- w$spd
+  if (length(spd) == 0) spd <- sqrt(w$u2)                   # fallback: RMS wind
+  # drag coefficient Cd(u10) (fas_L13 piecewise), air- then water-side ustar
+  Cd <- ifelse(spd <= 11, 0.0012,
+        ifelse(spd >= 20, 0.0018, 4.9e-4 + 6.5e-5 * spd))
+  ustar_a <- spd * sqrt(Cd)                                 # air-side, m s-1
+  ustar_w <- ustar_a / sqrt(rho_w / RHO_AIR)                # water-side, m s-1
+
+  # Kb: bubble transfer velocity, 5.5 = 1.98e6 (cm h-1) / 3.6e5; -> m d-1.
+  Kb_md  <- 5.5 * ustar_w^2.76 * (Sc / 660)^(-2 / 3) * 86400
+  dP     <- 1.5244 * ustar_w^1.06                           # fractional bubble overpressure
+  # per-hour fluxes (mmol O2 m-2 d-1, +into ocean), then interval mean
+  Fc_h <- XG_O2 * 5.56 * ustar_w^3.86 * 1000 * 86400        # mol m-2 s-1 -> mmol m-2 d-1
+  Fp_h <- Kb_md * (o2eq1 * (1 + dP) * slpc - o2surf)
+  Fc <- mean(Fc_h)
+  Fp <- mean(Fp_h)
+  Fas_bub <- Fc + Fp                                        # total bubble flux
+  Fas_tot <- Fas + Fas_bub                                  # diffusive + bubble
+
   list(k = k, u2 = w$u2, o2_eq = mean(c(o2_eq_p_i, o2_eq_p_j)),
-       dO2 = dO2, Fas = Fas)
+       dO2 = dO2, Fas = Fas,
+       Fc = Fc, Fp = Fp, Fas_bub = Fas_bub, Fas_tot = Fas_tot)
 }
 
 # helper: budget for an ordered pair of prof-table rows (later = j)
@@ -268,7 +332,13 @@ make_pair <- function(d, i, j, type) {
     o2_eq_mmol_m3     = fx$o2_eq,
     delta_o2_mmol_m3  = fx$dO2,
     Fas_mmol_o2_m2_d  = fx$Fas,
-    rate_corr_mmol_o2_m2_d = rate - fx$Fas
+    rate_corr_mmol_o2_m2_d = rate - fx$Fas,
+    # Liang 2013 bubble terms (on top of the diffusive Fas above)
+    Fc_mmol_o2_m2_d        = fx$Fc,
+    Fp_mmol_o2_m2_d        = fx$Fp,
+    Fas_bubble_mmol_o2_m2_d = fx$Fas_bub,
+    Fas_total_mmol_o2_m2_d  = fx$Fas_tot,    # diffusive + bubble
+    rate_corr_total_mmol_o2_m2_d = rate - fx$Fas_tot
   )
 }
 
@@ -396,10 +466,19 @@ make_pair_mld <- function(d, i, j, type) {
     delta_o2_mmol_m3  = fx$dO2,
     Fas_mmol_o2_m2_d  = fx$Fas,
     rate_corr_mmol_o2_m2_d = rate - fx$Fas,
+    # Liang 2013 bubble terms (areal, on top of the diffusive Fas above)
+    Fc_mmol_o2_m2_d        = fx$Fc,
+    Fp_mmol_o2_m2_d        = fx$Fp,
+    Fas_bubble_mmol_o2_m2_d = fx$Fas_bub,
+    Fas_total_mmol_o2_m2_d  = fx$Fas_tot,    # diffusive + bubble
+    rate_corr_total_mmol_o2_m2_d = rate - fx$Fas_tot,
     # Fix 1 - volumetric (concentration) versions of the common-z_int rate
     rate_vol_mmol_o2_m3_d      = rate_vol,
     Fas_vol_mmol_o2_m3_d       = Fas_vol,
     rate_corr_vol_mmol_o2_m3_d = rate_corr_vol,
+    # bubble + total diluted over the integration depth (mmol O2 m-3 d-1)
+    Fas_total_vol_mmol_o2_m3_d      = fx$Fas_tot / z_int,
+    rate_corr_total_vol_mmol_o2_m3_d = (rate - fx$Fas_tot) / z_int,
     # Fix 2 - moving mixed-layer budget (own-MLD, floored at 40 m) + entrainment
     mld_bar_m              = mld_bar,
     o2ml_start_mmol_m3     = o2ml_i,
@@ -474,7 +553,9 @@ budget_out <- budget |>
   select(type, mtime, t_start, t_end, dt_days, phase_start, phase_end,
          inv_start_mmol_m2, inv_end_mmol_m2, rate_mmol_o2_m2_d,
          k_m_d, u2_m2_s2, o2_eq_mmol_m3, delta_o2_mmol_m3,
-         Fas_mmol_o2_m2_d, rate_corr_mmol_o2_m2_d)
+         Fas_mmol_o2_m2_d, rate_corr_mmol_o2_m2_d,
+         Fc_mmol_o2_m2_d, Fp_mmol_o2_m2_d, Fas_bubble_mmol_o2_m2_d,
+         Fas_total_mmol_o2_m2_d, rate_corr_total_mmol_o2_m2_d)
 
 write_csv(budget_out, out_csv)
 cat(sprintf("Wrote %s (%d rows)\n", out_csv, nrow(budget_out)))
@@ -485,8 +566,12 @@ budget_mld_out <- budget_mld |>
          inv_start_mmol_m2, inv_end_mmol_m2, rate_mmol_o2_m2_d,
          k_m_d, u2_m2_s2, o2_eq_mmol_m3, delta_o2_mmol_m3,
          Fas_mmol_o2_m2_d, rate_corr_mmol_o2_m2_d,
+         # Liang 2013 bubble terms (areal) + diffusive+bubble total
+         Fc_mmol_o2_m2_d, Fp_mmol_o2_m2_d, Fas_bubble_mmol_o2_m2_d,
+         Fas_total_mmol_o2_m2_d, rate_corr_total_mmol_o2_m2_d,
          # Fix 1 - volumetric versions of the common-z_int rate
          rate_vol_mmol_o2_m3_d, Fas_vol_mmol_o2_m3_d, rate_corr_vol_mmol_o2_m3_d,
+         Fas_total_vol_mmol_o2_m3_d, rate_corr_total_vol_mmol_o2_m3_d,
          # Fix 2 - moving mixed-layer budget + entrainment (vol + areal)
          mld_bar_m, o2ml_start_mmol_m3, o2ml_end_mmol_m3, o2_below_mmol_m3, we_m_d,
          rate_ml_vol_mmol_o2_m3_d, Fas_ml_vol_mmol_o2_m3_d,
@@ -576,6 +661,21 @@ cat(sprintf("MLD net: pairs at 40 m floor = %d / %d (%.0f%%)\n",
             sum(is.finite(net_tbl_mld$z_int_m)),
             100 * mean(net_tbl_mld$z_int_m <= 40, na.rm = TRUE)))
 report_fit("MLD-NET (mine vs ref net change)   ", net_tbl_mld, ref_net)
+
+# --- Liang 2013 bubble-flux sanity summary (0-40 m prev series) --------------
+bub <- prev_tbl |> filter(is.finite(Fas_total_mmol_o2_m2_d))
+sumr_b <- function(x) sprintf("min=%.2f median=%.2f mean=%.2f max=%.2f",
+                              min(x), median(x), mean(x), max(x))
+cat("\n--- Bubble flux (Liang 2013), mmol O2 m-2 d-1, +into ocean ---\n")
+cat(sprintf("Fc (complete, always >=0): %s\n", sumr_b(bub$Fc_mmol_o2_m2_d)))
+cat(sprintf("Fp (partial)            : %s\n", sumr_b(bub$Fp_mmol_o2_m2_d)))
+cat(sprintf("Fas_bubble (Fc+Fp)      : %s\n", sumr_b(bub$Fas_bubble_mmol_o2_m2_d)))
+cat(sprintf("Fas diffusive (W2014)   : %s\n", sumr_b(bub$Fas_mmol_o2_m2_d)))
+cat(sprintf("Fas_total (diff+bubble) : %s\n", sumr_b(bub$Fas_total_mmol_o2_m2_d)))
+cat(sprintf("Fc check (all >= 0)     : %s\n", all(bub$Fc_mmol_o2_m2_d >= 0)))
+cat(sprintf("bubble share of |total| : median %.1f%%\n",
+            100 * median(abs(bub$Fas_bubble_mmol_o2_m2_d) /
+                         pmax(abs(bub$Fas_total_mmol_o2_m2_d), 1e-9))))
 
 # =============================================================================
 # Step 4 - comparison plot

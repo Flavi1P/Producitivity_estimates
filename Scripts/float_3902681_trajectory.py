@@ -3,13 +3,11 @@ Trajectory + dawn/dusk sampling figure for BGC-Argo float 3902681.
 
 Panels:
   A  trajectory map, coloured by date (Iceland Basin / Irminger Sea).
-  B  local-solar-time of profiles, zoomed on a typical ~2-week stretch,
-     showing the cycle-to-cycle dawn <-> dusk flip in the real data.
-  C  schematic of one dawn-dusk cycle: float depth vs time over 2.5 days,
-     with the day/night light cycle, surfacing at dawn then dusk.
+  C  schematic of the dusk -> pre-dawn night bracket: float depth vs time,
+     with the day/night light cycle, isolating the ~11 h night O2-loss unit.
 
 Run from repo root:
-  C:/Users/petit/anaconda3/envs/cmts_learn_olci/python.exe Scripts/float_3902681_trajectory.py
+  C:/Users/flapet/AppData/Local/miniforge3/envs/productivity_py/python.exe Scripts/float_3902681_trajectory.py
 """
 import numpy as np
 import pandas as pd
@@ -60,16 +58,16 @@ plt.rcParams.update({
     "font.family": "DejaVu Sans", "font.size": 10,
     "axes.edgecolor": "#444", "axes.linewidth": 0.8,
 })
-fig = plt.figure(figsize=(14, 8.2))
-gs = fig.add_gridspec(2, 2, width_ratios=[1.45, 1.0], height_ratios=[1.0, 1.0],
-                      wspace=0.16, hspace=0.42,
-                      left=0.045, right=0.965, top=0.90, bottom=0.085)
+fig = plt.figure(figsize=(14, 5.8))
+gs = fig.add_gridspec(1, 2, width_ratios=[1.45, 1.0],
+                      wspace=0.16,
+                      left=0.045, right=0.965, top=0.90, bottom=0.10)
 
 proj = ccrs.LambertConformal(central_longitude=-22, central_latitude=61)
 pc = ccrs.PlateCarree()
 
 # === Panel A: trajectory map =================================================
-axm = fig.add_subplot(gs[:, 0], projection=proj)
+axm = fig.add_subplot(gs[0], projection=proj)
 pad_x, pad_y = 1.6, 0.6
 axm.set_extent([df.lon.min() - pad_x, df.lon.max() + pad_x,
                 df.lat.min() - pad_y, df.lat.max() + pad_y], crs=pc)
@@ -93,16 +91,25 @@ lc.set_array(tnum[:-1])
 axm.add_collection(lc)
 axm.scatter(df.lon, df.lat, c=tnum, cmap="viridis", s=11, transform=pc,
             zorder=3, edgecolor="white", linewidth=0.25)
-axm.scatter(df.lon.iloc[0], df.lat.iloc[0], marker="*", s=320, c="#1a9850",
-            transform=pc, zorder=5, edgecolor="k", linewidth=0.6)
-axm.scatter(df.lon.iloc[-1], df.lat.iloc[-1], marker="s", s=90, c="#d73027",
-            transform=pc, zorder=5, edgecolor="k", linewidth=0.6)
+# Neutral start/end markers (white fill, black edge) so their colour implies no
+# date on the viridis colourbar; shape alone distinguishes deploy (star) vs last
+# (square).
+axm.scatter(df.lon.iloc[0], df.lat.iloc[0], marker="*", s=340, c="white",
+            transform=pc, zorder=5, edgecolor="k", linewidth=1.0)
+axm.scatter(df.lon.iloc[-1], df.lat.iloc[-1], marker="s", s=95, c="white",
+            transform=pc, zorder=5, edgecolor="k", linewidth=1.0)
+# Labels offset into open water with leader lines so they don't sit on the dense
+# Iceland-shelf track tangle.
+_lbl_bbox = dict(boxstyle="round,pad=0.25", fc="white", ec="#888", lw=0.6)
+_leader = dict(arrowstyle="-", color="#555", lw=0.8, shrinkA=2, shrinkB=7)
 axm.annotate("deploy\n" + str(t0.date()), (df.lon.iloc[0], df.lat.iloc[0]),
-             xytext=(8, -16), textcoords="offset points", transform=pc,
-             fontsize=8, color="#1a6b35", fontweight="bold")
+             xytext=(-52, -46), textcoords="offset points", transform=pc,
+             fontsize=8, color="#222", fontweight="bold",
+             ha="center", va="center", bbox=_lbl_bbox, arrowprops=_leader)
 axm.annotate("last\n" + str(t1.date()), (df.lon.iloc[-1], df.lat.iloc[-1]),
-             xytext=(8, 6), textcoords="offset points", transform=pc,
-             fontsize=8, color="#a01e16", fontweight="bold")
+             xytext=(50, 40), textcoords="offset points", transform=pc,
+             fontsize=8, color="#222", fontweight="bold",
+             ha="center", va="center", bbox=_lbl_bbox, arrowprops=_leader)
 
 cb = fig.colorbar(lc, ax=axm, orientation="horizontal", pad=0.05,
                   shrink=0.82, aspect=34)
@@ -115,47 +122,28 @@ axm.set_title(f"BGC-Argo float {FLOAT}  ·  {n} profiles  ·  "
               f"Iceland Basin / Irminger Sea",
               fontsize=12, fontweight="bold", pad=8)
 
-# === Panel B: zoom on a typical cycle (real data) ============================
-axt = fig.add_subplot(gs[0, 1])
-w0, w1 = pd.Timestamp("2025-04-21"), pd.Timestamp("2025-05-03")
-win = df[(df.time >= w0) & (df.time <= w1)]
-axt.axhspan(0, 12, color=cdawn, alpha=0.07)
-axt.axhspan(12, 24, color=cdusk, alpha=0.07)
-axt.axhline(12, color="#999", lw=0.7, ls="--")
-axt.plot(win.time, win.lst, "-", color="#bbb", lw=1.0, zorder=2)
-md = win.phase == "dawn"
-axt.scatter(win.time[md], win.lst[md], s=55, c=cdawn, zorder=4,
-            edgecolor="k", linewidth=0.4, label="dawn profile (~06 h)")
-axt.scatter(win.time[~md], win.lst[~md], s=55, c=cdusk, zorder=4,
-            edgecolor="k", linewidth=0.4, label="dusk profile (~18 h)")
-axt.set_ylim(0, 24)
-axt.set_yticks([0, 6, 12, 18, 24])
-axt.set_ylabel("Local solar time  (h)")
-axt.set_title("Profiles flip dawn ↔ dusk each cycle  (zoom)",
-              fontsize=11, fontweight="bold")
-axt.legend(loc="center left", fontsize=8, framealpha=0.92, handletextpad=0.3)
-axt.xaxis.set_major_locator(mdates.DayLocator(interval=3))
-axt.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
-axt.tick_params(labelsize=8)
-axt.grid(True, axis="y", alpha=0.25, lw=0.5)
-
-# === Panel C: schematic of one dawn-dusk cycle ===============================
-# Idealised: 2.5-day (60 h) window. Float parks at depth, surfaces to profile
-# at dawn (light on) then at dusk (light off), matching the ~37 h / ~11 h gaps.
-axs = fig.add_subplot(gs[1, 1])
+# === Panel C: the dusk -> pre-dawn night bracket =============================
+# The respiration (night O2-loss) signal comes from a dusk profile paired with
+# the immediately following pre-dawn profile ~11 h later (dusk->dawn, < 0.7 d;
+# see night_tbl in o2_budget_3902681_fullmld.R). The O2 drawdown between those
+# two casts, over the intervening night, IS night-time respiration. This panel
+# makes that dusk->pre-dawn pair the obvious unit; daytime parking merely
+# separates one night bracket from the next.
+axs = fig.add_subplot(gs[1])
 PARK = 1000.0          # parking depth (m)
-H = 60.0               # window length (h) = 2.5 days
+H = 48.0               # window length (h) = 2 days of context
 
-# profile surfacings (h): dawn -> +36 h dusk -> +12 h dawn
-t_dawn1, t_dusk, t_dawn2 = 6.0, 42.0, 54.0
+# profile surfacings (h): dusk (18 h) -> pre-dawn (29 h, ~11 h later) -> next
+# dusk (42 h). The dusk1 -> dawn pair (18->29 h) is the highlighted night unit.
+t_dusk1, t_dawn, t_dusk2 = 18.0, 29.0, 42.0
 
-def vee(tc, half=1.2):
+def vee(tc, half=1.1):
     """ascend-to-surface / descend-to-park V around a surfacing time tc."""
     return ([tc - half, tc, tc + half], [PARK, 0.0, PARK])
 
 # build the depth path across the window
 tx, dz = [0.0], [PARK]
-for tc in (t_dawn1, t_dusk, t_dawn2):
+for tc in (t_dusk1, t_dawn, t_dusk2):
     xs, ys = vee(tc)
     tx += xs; dz += ys
 tx += [H]; dz += [PARK]
@@ -166,43 +154,55 @@ axs.set_ylim(PARK + 90, -230)        # headroom above 0 = "sky"
 # day / night shading (sun up 06-18 local each day) across full height
 for d in range(3):
     axs.axvspan(d * 24 + 6, d * 24 + 18, color="#ffe39a", alpha=0.55, zorder=0)
-    axs.axvspan(d * 24 + 18, d * 24 + 30, color="#23355c", alpha=0.12, zorder=0)
-axs.axvspan(0, 6, color="#23355c", alpha=0.12, zorder=0)
+    axs.axvspan(d * 24 + 18, d * 24 + 30, color="#23355c", alpha=0.10, zorder=0)
+axs.axvspan(0, 6, color="#23355c", alpha=0.10, zorder=0)
+
+# emphasise the dusk -> pre-dawn NIGHT bracket (the respiration unit)
+axs.axvspan(t_dusk1, t_dawn, color="#23355c", alpha=0.20, zorder=0.4)
 
 # sun / moon glyphs in the sky band
-for d in range(3):
-    axs.text(d * 24 + 12, -185, "☀", ha="center", va="center", fontsize=15,
+for c in (12, 36):
+    axs.text(c, -185, "☀", ha="center", va="center", fontsize=15,
              color="#e8a300", zorder=2)
-for c in (0, 24, 48):
-    axs.text(c, -185, "☾", ha="center", va="center", fontsize=11,
-             color="#5b6b8c", zorder=2)
+axs.text(24, -185, "☾", ha="center", va="center", fontsize=12,
+         color="#cdd6ea", zorder=2)
 
 axs.plot(tx, dz, "-", color="#333", lw=2.0, zorder=3)
 axs.axhline(0, color="#2e9e6f", lw=1.2, ls=":", zorder=1)   # sea surface
 
 # surfacing markers + labels just above the surface
-for tc, ph in [(t_dawn1, "dawn"), (t_dusk, "dusk"), (t_dawn2, "dawn")]:
+for tc, ph, lbl in [(t_dusk1, "dusk", "dusk\nprofile"),
+                    (t_dawn, "dawn", "pre-dawn\nprofile"),
+                    (t_dusk2, "dusk", "dusk\nprofile")]:
     col = cdawn if ph == "dawn" else cdusk
     axs.scatter([tc], [0], s=150, c=col, edgecolor="k", linewidth=0.5,
                 zorder=5, clip_on=False)
-    axs.annotate(f"{ph}\nprofile", (tc, 0), xytext=(0, 9),
+    axs.annotate(lbl, (tc, 0), xytext=(0, 9),
                  textcoords="offset points", ha="center", va="bottom",
                  fontsize=8.5, fontweight="bold", color=col, zorder=6)
 
-axs.text(30, 905, "drift / park at ~1000 m", ha="center", fontsize=8,
-         color="#555", style="italic", zorder=4)
+# what the bracket measures
+axs.annotate(r"$\Delta$O$_2$ = night respiration",
+             ((t_dusk1 + t_dawn) / 2, 175), ha="center", va="center",
+             fontsize=8.5, fontweight="bold", color="#1b2a4a", zorder=6)
 
-# 2.5-day span bar
-axs.annotate("", xy=(0, 1055), xytext=(H, 1055),
-             arrowprops=dict(arrowstyle="<->", color="#333", lw=1.3))
-axs.text(H / 2, 1085, "one dawn–dusk cycle  ≈  2.5 days",
-         ha="center", va="top", fontsize=9, fontweight="bold")
+# park label in the clear day-time drift segment between the two nights
+axs.text((t_dawn + t_dusk2) / 2, 905, "drift / park at ~1000 m", ha="center",
+         fontsize=8, color="#555", style="italic", zorder=4)
+
+# night-bracket span bar (~11 h)
+axs.annotate("", xy=(t_dusk1, 1055), xytext=(t_dawn, 1055),
+             arrowprops=dict(arrowstyle="<->", color="#1b2a4a", lw=1.5))
+axs.text((t_dusk1 + t_dawn) / 2, 1085,
+         "night bracket  ≈  11 h", ha="center", va="top",
+         fontsize=9, fontweight="bold", color="#1b2a4a")
 
 axs.set_ylabel("Depth  (m)")
 axs.set_xlabel("Time  (hours)")
 axs.set_xticks(np.arange(0, H + 1, 12))
 axs.set_yticks([0, 250, 500, 750, 1000])
-axs.set_title("Dawn–dusk cycle schematic", fontsize=11, fontweight="bold")
+axs.set_title("Night O₂-loss bracket  (dusk → pre-dawn)",
+              fontsize=11, fontweight="bold")
 axs.tick_params(labelsize=8)
 
 fig.savefig(OUT, dpi=200, bbox_inches="tight", facecolor="white")

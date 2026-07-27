@@ -10,9 +10,12 @@ the standalone NPP and NCP figures:
   NCP : nitrate-drawdown synthetic year (full 12-month periodic climatology).
 
 Both are plotted on the same primary axis (mmol C m-2 d-1). The e-ratio
-(NCP:NPP) is overlaid on a secondary axis, restricted to the Feb-Oct window
-where NPP is an actual satellite-derived estimate (not a winter spline
-extrapolation), avoiding divide-by-near-zero artefacts.
+(NCP:NPP) is overlaid on a secondary axis and shown for the whole year:
+Feb-Oct uses the actual CbPM NPP estimate (solid line), while Nov-Jan uses
+the winter cubic-spline interpolation of NPP (dashed line, exactly the curve
+drawn in Fig 4). The only points dropped are the deep-winter days where the
+interpolated NPP falls below NPP_FLOOR (mmol C m-2 d-1) and the ratio would
+diverge as NPP -> 0.
 
 Input:  Output/cmems_npp_timeseries_domain_mean.csv
         Output/IcelandIrminger_2015_2025/ncp/IcelandIrminger/ncp_uncertainty.xlsx
@@ -44,7 +47,30 @@ BLUE         = ncp_mod.BLUE
 BLUE_LIGHT   = ncp_mod.BLUE_LIGHT
 ERATIO_COLOR = "#7a2048"
 MONTH_LABELS = npp_mod.MONTH_LABELS
-OBS_MONTHS   = set(range(2, 11))   # Feb-Oct: real CbPM NPP, not winter spline
+OBS_MONTHS   = set(range(2, 11))   # Feb-Oct: real CbPM NPP; else winter spline
+# Below this interpolated-NPP value the e-ratio (NCP:NPP) diverges as NPP -> 0
+# (the Fig-4 spline is anchored to 0 at DOY 1/365), so those deep-winter days
+# are dropped rather than plotted as a spike. Tunable.
+NPP_FLOOR    = 5.0                 # mmol C m-2 d-1
+
+
+def _plot_segments(ax, x, y, mask, connect, **plot_kw):
+    """Plot y over contiguous runs of `mask`, extending each run by one point
+    into a neighbour that is `connect`-eligible so adjacent solid/dashed
+    segments meet with no visible gap. Only the first run carries the label."""
+    idx = np.where(mask)[0]
+    if len(idx) == 0:
+        return
+    label  = plot_kw.pop("label", None)
+    breaks = np.where(np.diff(idx) > 1)[0] + 1
+    for k, seg in enumerate(np.split(idx, breaks)):
+        i0, i1 = seg[0], seg[-1]
+        if i0 - 1 >= 0 and connect[i0 - 1]:
+            i0 -= 1
+        if i1 + 1 < len(x) and connect[i1 + 1]:
+            i1 += 1
+        ax.plot(x[i0:i1 + 1], y[i0:i1 + 1],
+                label=label if k == 0 else None, **plot_kw)
 
 
 def main() -> int:
@@ -60,13 +86,17 @@ def main() -> int:
     doy_ncp, ncp_mean, ncp_p10, ncp_p90, ncp_clim = ncp_mod.build_synthetic_year(ncp_df)
     assert np.allclose(doy, doy_ncp), "NPP/NCP synthetic-year grids must match"
 
-    # ---- e-ratio, restricted to the observed NPP window ----
+    # ---- e-ratio, full year (winter uses the Fig-4 spline NPP) ----
     doy_month = np.array(
         [(pd.Timestamp(2021, 1, 1) + pd.Timedelta(days=int(d) - 1)).month for d in doy]
     )
-    valid = np.isin(doy_month, list(OBS_MONTHS))
+    is_obs = np.isin(doy_month, list(OBS_MONTHS))   # Feb-Oct: real CbPM NPP
+    is_win = ~is_obs                                # Nov-Jan: NPP from spline
+    # Only define the ratio where NPP is above the floor (avoid the NPP -> 0
+    # singularity where the spline is anchored to 0).
+    npp_ok = npp_mean_c >= NPP_FLOOR
     eratio = np.full_like(doy, np.nan, dtype=float)
-    eratio[valid] = ncp_mean[valid] / npp_mean_c[valid]
+    eratio[npp_ok] = ncp_mean[npp_ok] / npp_mean_c[npp_ok]
 
     # ---- figure ----
     mpl.rcParams.update({"axes.spines.right": True})   # need the right spine here
@@ -97,17 +127,28 @@ def main() -> int:
     # e-ratio, overlaid on secondary axis
     ax2.axhline(0, color=ERATIO_COLOR, lw=0.7, ls=":", alpha=0.4, zorder=3)
     ax2.axhline(1, color=ERATIO_COLOR, lw=0.8, ls="--", alpha=0.5, zorder=3)
-    ax2.plot(doy[valid], eratio[valid], color=ERATIO_COLOR, lw=2.4, ls="-",
-             marker="o", ms=4.5, markevery=3, zorder=6,
-             label="e-ratio (NCP:NPP)")
+
+    # Observed-NPP window: solid line + markers
+    _plot_segments(ax2, doy, eratio, is_obs & npp_ok, connect=npp_ok,
+                   color=ERATIO_COLOR, lw=2.4, ls="-",
+                   marker="o", ms=4.5, markevery=3, zorder=6,
+                   label="e-ratio (NCP:NPP), observed NPP")
+    # Winter: interpolated-NPP window, dashed (matches Fig 4 winter styling)
+    _plot_segments(ax2, doy, eratio, is_win & npp_ok, connect=npp_ok,
+                   color=ERATIO_COLOR, lw=1.8, ls="--", zorder=6,
+                   label="e-ratio, winter (interpolated NPP)")
 
     ax2.set_ylabel("e-ratio  (NCP : NPP)", fontsize=11, color=ERATIO_COLOR)
-    ax2.set_ylim(-1.0, 1.3)
+    # Contain the (bounded) winter dip, keeping the 1.0 reference visible.
+    er_lo = np.nanmin(eratio)
+    er_hi = np.nanmax(eratio)
+    ax2.set_ylim(min(-1.0, np.floor((er_lo - 0.2) * 2) / 2),
+                 max(1.3, np.ceil((er_hi + 0.2) * 2) / 2))
     ax2.tick_params(axis="y", colors=ERATIO_COLOR)
     ax2.spines["right"].set_color(ERATIO_COLOR)
 
     h2, l2 = ax2.get_legend_handles_labels()
-    ax2.legend(h2, l2, loc="upper right", fontsize=9)
+    ax2.legend(h2, l2, loc="upper right", fontsize=8.5)
 
     fig.suptitle(
         "Synthetic-year NPP, NCP and e-ratio\n"
@@ -115,9 +156,11 @@ def main() -> int:
         fontsize=11.5, y=0.99,
     )
     ax1.text(0.985, 0.02,
-             "e-ratio shown Feb–Oct only\n(no CbPM NPP estimate in winter)",
+             "e-ratio solid = observed CbPM NPP (Feb–Oct)\n"
+             "dashed = winter spline-interpolated NPP (Nov–Jan)\n"
+             f"(undefined where interpolated NPP < {NPP_FLOOR:.0f} mmol C m$^{{-2}}$ d$^{{-1}}$)",
              transform=ax1.transAxes, ha="right", va="bottom",
-             fontsize=7.5, color="0.45")
+             fontsize=7.0, color="0.45")
 
     fig.tight_layout()
     OUT_PNG.parent.mkdir(parents=True, exist_ok=True)

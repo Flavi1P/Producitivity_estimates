@@ -289,6 +289,97 @@ credentials (`~/.cdsapirc`) — do not automate credential provisioning.
 
 ---
 
+## Task 9 — Seasonal reproducibility on Figs 3 & 4 (PI request)  ✅ DONE
+
+> **Status:** implemented 2026-08-12 in `Scripts/figure_config.py`,
+> `Scripts/ncp_timeseries_figure.py`, `Scripts/npp_timeseries_figure.py`.
+> Both figures re-run and inspected. `Scripts/eratio_synthetic_year_figure.py`
+> re-run to confirm the refactor did not change its output path.
+>
+> **The metric.** Each calendar year is regressed on the seasonal climatology
+> evaluated at the same day-of-year:
+> `obs(t) = slope · clim(doy(t)) + intercept`. Reported per year:
+> `r2` (variance explained by the climatological shape/phase — the
+> reproducibility score, independent of amplitude and offset), `slope`
+> (amplitude anomaly, >1 = stronger cycle than the norm), `nse`
+> (Nash-Sutcliffe against the 1:1 line, i.e. skill of the raw climatology as a
+> direct predictor), `rmse`, `bias`.
+>
+> **Leave-one-out.** The predictor climatology for year *Y* is rebuilt from the
+> other years only. With 9–11 years each year would otherwise contribute ~10%
+> of its own "norm" and inflate its own score. The *plotted* climatology in
+> panel (b) is still the all-years one — noted in the caption.
+>
+> **What was implemented:**
+> - `figure_config.per_year_climatology_regression(dates, values, clim_fn,
+>   min_points)` — the shared implementation; `clim_fn(year, doy)` is what lets
+>   the caller pass a leave-one-out climatology. Returns a tidy DataFrame.
+>   Also added `R2_CMAP = "cividis"`, `R2_VMIN = 0.0`, `R2_VMAX = 1.0`: the
+>   R² colour scale is **fixed 0–1 in both figures** so a colour means the same
+>   thing in Fig 3 and Fig 4 and the two are comparable at a glance.
+>   (`figure_config` now imports pandas.)
+> - Both figure scripts: `build_synthetic_year` split into
+>   `build_climatology(df) -> (cs_mean, cs_p10, cs_p90, clim_df)` +
+>   a thin `build_synthetic_year` wrapper. **Signature and return value of
+>   `build_synthetic_year` are unchanged**, so `eratio_synthetic_year_figure.py`
+>   (which calls `npp_mod` / `ncp_mod.build_synthetic_year`) is unaffected.
+> - New `compute_reproducibility(df, leave_one_out=True)` in each script.
+> - Panel (b): individual-year lines are now coloured by their R² instead of
+>   uniform grey; the climatology mean line gets a white `path_effects` halo so
+>   it stays readable over them.
+> - **New panel (c)** in both figures: per-year R² bars (same colormap) +
+>   regression slope as black diamonds on a right axis, dotted reference at
+>   slope = 1, dashed mean-R² line. The top 13% of both axes is reserved
+>   (`HEADROOM`) so the legend never covers a bar or a marker.
+> - Figures are now 3-panel, `figsize=(10, 11.5)`, `height_ratios=[1, 1, 0.72]`.
+> - New standalone outputs + machine-readable metrics:
+>   `Output/npp_seasonal_reproducibility.{png,csv}` and
+>   `Output/IcelandIrminger_2015_2025/ncp/IcelandIrminger/ncp_seasonal_reproducibility.{png,csv}`.
+>
+> **Also fixed in passing** (both were Task 4/5 items on the panels being edited):
+> - Panel (b) y-limits are now computed to contain every individual-year spline
+>   instead of being hard-coded (NPP was `(-50, 1850)`; NCP had none), and
+>   `assert_within_axis` is called. This closes the Task 4.1 top-clipping item.
+> - Both scripts now import their colours from `figure_config` (Task 4.4).
+> - Coverage strings in titles are derived from the data, not hard-coded.
+> - Removed a dead duplicated `is_obs` computation in `npp` panel (b).
+>
+> **Weighting (added after the first pass — see
+> `METHODS_seasonal_reproducibility.md` for the full write-up).** The NCP fit is
+> **inverse-variance weighted by the Monte Carlo σ**; `sigma=` is an optional
+> argument of `per_year_climatology_regression`. This is not cosmetic: median σ
+> is 1.7–2.7 mmol C m⁻² d⁻¹ in Jun–Sep but 10–16 in Nov–May, so unweighted the
+> score is set by winter bins that are not significantly different from zero
+> (2023-01-20 = +32.4 ± 21.8 — a positive January NCP, physically impossible).
+> NPP is deliberately left **unweighted**: `npp_int_std` is a *spatial* SD
+> across grid cells, not an uncertainty on the monthly mean.
+>
+> **Result (worth knowing before writing this up).** On the comparable measure
+> the two records are similarly reproducible: NPP mean R² = **0.878**
+> (0.834–0.965, slopes 0.81–1.06); NCP weighted mean R² = **0.894**
+> (0.809–0.945, slopes 0.81–1.13). No outlier year in either.
+>
+> ⚠️ **The first pass reported the opposite and it was wrong.** Unweighted, NCP
+> gives mean R² 0.73 with 2022/2023 at 0.49/0.21, which looks like "NPP repeats
+> year on year, NCP does not". Weighted, those years are 0.85/0.88 (2023's slope
+> moves 0.49 → 1.12). The unweighted contrast measures **winter measurement
+> precision in the nitrate budget**, not interannual variability in production —
+> do not present it as the latter. The unweighted values are kept in the CSV
+> (`r2_unweighted`, `slope_unweighted`) and drawn as black dashes on the bars in
+> Fig 3c as a visible sensitivity check.
+>
+> **Also considered and rejected:** dropping 2022+2023 from the NCP climatology.
+> Circular (defines the norm by deleting the years that disagree with it), and
+> negligible anyway — it shifts the climatology by ≤ 4.25 mmol C m⁻² d⁻¹ against
+> a seasonal amplitude of 53.6. Rationale recorded in the methods note §7.
+>
+> **Not done / open:** the NPP climatology still carries the Task 5 hard-zero
+> winter anchors. They only shape the unobserved Nov–Jan tails and the
+> regression is evaluated on observed Feb–Oct months only, so the R² values are
+> unaffected — but Task 5 should still be done.
+
+---
+
 ## Final verification (all tasks)
 
 Run each of the five figure scripts from repo root and inspect outputs against `REVIEW.md`'s
@@ -298,7 +389,9 @@ Run each of the five figure scripts from repo root and inspect outputs against `
       TODO: make it the *only* place — Tasks 2–7 must delete their local duplicates.
 - [x] Fig 1: neutral markers, non-overlapping annotations, dusk→pre-dawn schematic. (Task 2 done)
 - [x] Fig 2: winter GOP masked, band tightened, no clipping, legend legible. (Task 3 done)
-- [ ] Fig 3: panel (b) no top clip.
+- [x] Fig 3: panel (b) no top clip. (done as part of Task 9; 4.2 marker density
+      and 4.3 bin-label check still open)
 - [ ] Fig 4: no hard-zero winter; "not estimated" rendering; documented annual total.
+- [x] Figs 3 & 4: seasonal-reproducibility panel (c). (Task 9 done)
 - [ ] Fig 5: single zero per axis, documented mapping function, common-year e-ratio.
 - [ ] Coverage labels consistent everywhere.

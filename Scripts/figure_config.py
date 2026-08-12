@@ -11,11 +11,14 @@ across the figure scripts (`synthesis_gop_npp_ncp_figure.py`, `gop_vs_ncp_*`,
   * the estimate colours / shading colours,
   * the GOP deep-mixing (winter) validity threshold,
 
-plus three helpers that let every figure render identically:
+plus four helpers that let every figure render identically:
 
   * ``centered_window_stats`` - the one shared smoothing implementation,
   * ``render_masked``         - grey band + line suppression over invalid spans,
-  * ``assert_within_axis``    - guard against silent y-axis clipping.
+  * ``assert_within_axis``    - guard against silent y-axis clipping,
+  * ``per_year_climatology_regression`` - the seasonal-reproducibility metric
+    (per-year OLS against the seasonal climatology) shared by the NCP and NPP
+    timeseries figures.
 
 Importing this module has NO side effects on matplotlib state (it does not touch
 ``rcParams``) so each figure keeps its own styling.
@@ -24,6 +27,7 @@ Importing this module has NO side effects on matplotlib state (it does not touch
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 # ---------------------------------------------------------------------------
 # Smoothing (per mat_and_meth.md S2.2.1)
@@ -76,6 +80,16 @@ MASK_BAND = "#d9d9d9"    # grey band drawn over invalid ("not estimated") spans
 # Seasonal-regime shading (single-float synthesis figure)
 P1_SHADE = "#f6d98a"     # warm gold  - spring onset
 P2_SHADE = "#c9b8dd"     # muted violet - post-bloom drawdown
+
+# ---------------------------------------------------------------------------
+# Seasonal-reproducibility colour scale
+# ---------------------------------------------------------------------------
+# Per-year R^2 against the seasonal climatology is colour-coded with a FIXED
+# 0-1 normalisation in every figure, so a colour means the same thing in the
+# NCP figure and in the NPP figure and the two are comparable at a glance.
+R2_CMAP = "cividis"      # colourblind-safe, distinct from the NCP/NPP hues
+R2_VMIN = 0.0
+R2_VMAX = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -227,3 +241,128 @@ def assert_within_axis(ax, *arrays, tol=1e-9):
                 f"assert_within_axis: plotted values [{amin:.4g}, {amax:.4g}] "
                 f"exceed axis y-limits [{lo:.4g}, {hi:.4g}]"
             )
+
+
+# ---------------------------------------------------------------------------
+# Seasonal reproducibility
+# ---------------------------------------------------------------------------
+
+def per_year_climatology_regression(dates, values, clim_fn, min_points=4,
+                                    sigma=None):
+    """Regress each calendar year's observations on the seasonal climatology.
+
+    For every year present in ``dates`` a least-squares fit
+
+        obs(t) = slope * clim(doy(t)) + intercept
+
+    is performed, where ``clim_fn(year, doy)`` returns the climatological value
+    at the given day-of-year.  ``clim_fn`` receives the year so the caller can
+    supply a **leave-one-out** climatology (the year under test excluded from
+    the multi-year mean).  That matters here: with only 9-11 years each year
+    contributes ~10% of its own "norm", which inflates the agreement if the
+    full climatology is used as the predictor.
+
+    Weighting
+    ---------
+    If per-observation uncertainties ``sigma`` are supplied the fit and every
+    goodness-of-fit statistic are **inverse-variance weighted** (w = 1/sigma^2).
+    This is not cosmetic for the nitrate-budget NCP record: its Monte Carlo
+    sigma is 2-5 mmol C m-2 d-1 in the productive season but 15-32 in winter,
+    i.e. as large as the signal.  Unweighted, a handful of essentially
+    unconstrained winter bins dominate the score and a year is penalised for
+    having noisy winter data rather than for an anomalous seasonal cycle.
+    Supply ``sigma`` whenever a genuine per-point uncertainty exists; leave it
+    ``None`` when the available spread is not an error estimate (e.g. the CbPM
+    NPP product's *spatial* standard deviation across grid cells).
+
+    Parameters
+    ----------
+    dates : array-like of datetime-like
+        Observation times.
+    values : array-like of float
+        Observed quantity (NaNs are dropped).
+    clim_fn : callable(year, doy_array) -> ndarray
+        Climatology evaluated at the requested days-of-year.
+    min_points : int
+        Years with fewer valid observations than this are skipped.
+    sigma : array-like of float, optional
+        Per-observation 1-sigma uncertainty, aligned with ``values``.  Enables
+        inverse-variance weighting.
+
+    Returns
+    -------
+    pandas.DataFrame with one row per year and columns
+
+    ``year``       calendar year
+    ``n``          number of observations used
+    ``slope``      amplitude anomaly: >1 = seasonal cycle stronger than normal
+    ``intercept``  offset of the fit (data units)
+    ``r2``         (weighted) coefficient of determination of the fit.  How
+                   much of that year's variance the climatological *shape and
+                   phase* explain, independent of amplitude and offset -- this
+                   is the seasonal-reproducibility score.
+    ``nse``        Nash-Sutcliffe efficiency against the 1:1 line (no fitted
+                   slope): skill of the raw climatology as a direct predictor.
+                   Lower than ``r2`` whenever amplitude/offset also differ; can
+                   go negative when the climatology beats nothing.
+    ``rmse``       root-mean-square deviation from the climatology (data units)
+    ``bias``       mean(obs - clim) (data units)
+    ``weighted``   bool, whether inverse-variance weights were applied
+    """
+    dates = pd.to_datetime(pd.Series(list(dates))).reset_index(drop=True)
+    values = pd.Series(np.asarray(values, dtype=float)).reset_index(drop=True)
+    if sigma is None:
+        sig = pd.Series(np.ones(len(values)))
+    else:
+        sig = pd.Series(np.asarray(sigma, dtype=float)).reset_index(drop=True)
+
+    ok = values.notna()
+    dates, values, sig = dates[ok], values[ok], sig[ok]
+
+    rows = []
+    for year in sorted(dates.dt.year.unique()):
+        sel = dates.dt.year == year
+        if int(sel.sum()) < min_points:
+            continue
+        doy = dates[sel].dt.dayofyear.to_numpy(dtype=float)
+        y = values[sel].to_numpy(dtype=float)
+        s = sig[sel].to_numpy(dtype=float)
+        x = np.asarray(clim_fn(int(year), doy), dtype=float)
+
+        good = np.isfinite(x) & np.isfinite(y)
+        if sigma is not None:
+            good &= np.isfinite(s) & (s > 0)
+        x, y, s = x[good], y[good], s[good]
+        if x.size < min_points or np.ptp(x) == 0 or np.ptp(y) == 0:
+            continue
+
+        if sigma is None:
+            w = np.ones_like(y)
+        else:
+            # floor sigma at a small fraction of the year's median so a single
+            # near-zero uncertainty cannot dominate the whole fit
+            s = np.maximum(s, 0.05 * np.median(s))
+            w = 1.0 / s ** 2
+        w = w / w.sum()          # normalise; scale is irrelevant to the fit
+
+        # np.polyfit weights multiply the residuals, so pass sqrt(w)
+        slope, intercept = np.polyfit(x, y, 1, w=np.sqrt(w))
+        resid = y - (slope * x + intercept)
+        y_bar = np.sum(w * y)
+        ss_tot = np.sum(w * (y - y_bar) ** 2)
+        r2 = 1.0 - np.sum(w * resid ** 2) / ss_tot
+        nse = 1.0 - np.sum(w * (y - x) ** 2) / ss_tot
+
+        rows.append({
+            "year": int(year),
+            "n": int(x.size),
+            "slope": float(slope),
+            "intercept": float(intercept),
+            "r2": float(r2),
+            "nse": float(nse),
+            "rmse": float(np.sqrt(np.sum(w * (y - x) ** 2))),
+            "bias": float(np.sum(w * (y - x))),
+            "weighted": sigma is not None,
+        })
+
+    return pd.DataFrame(rows)

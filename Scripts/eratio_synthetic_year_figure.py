@@ -352,6 +352,13 @@ def main() -> int:
              label="NCP (nitrate budget)")
 
     ax1.set_ylabel("Production (mmol C m$^{-2}$ d$^{-1}$)", fontsize=11)
+    # Zero must sit at the same height on both axes. The e-ratio axis is fixed
+    # to (-1, 1), i.e. zero at mid-height, so the production axis is made
+    # symmetric about zero as well.
+    prod_lim = 1.05 * np.nanmax(
+        np.abs(np.concatenate([npp_p10_c, npp_p90_c, ncp_p10, ncp_p90]))
+    )
+    ax1.set_ylim(-prod_lim, prod_lim)
     ax1.set_xlim(1, 365)
     mid_doys = [pd.Timestamp(2021, m, 15).timetuple().tm_yday for m in range(1, 13)]
     ax1.set_xticks(mid_doys)
@@ -381,11 +388,10 @@ def main() -> int:
                    label="e-ratio, winter (interpolated NPP)")
 
     ax2.set_ylabel("e-ratio  (NCP : NPP)", fontsize=11, color=ERATIO_COLOR)
-    # Limits contain the full +/-1 SD ribbon, keeping the 1.0 reference visible.
-    er_lo = np.nanmin(er_lo_band)
-    er_hi = np.nanmax(er_hi_band)
-    ax2.set_ylim(min(-1.0, np.floor((er_lo - 0.2) * 2) / 2),
-                 max(1.3, np.ceil((er_hi + 0.2) * 2) / 2))
+    # Fixed to (-1, 1) so zero sits at mid-height, matching the symmetric
+    # production axis. The +/-1 SD ribbon is clipped where it runs outside
+    # that range; the unclipped values are in eratio_doy_stats.csv.
+    ax2.set_ylim(-1.0, 1.0)
     ax2.tick_params(axis="y", colors=ERATIO_COLOR)
     ax2.spines["right"].set_color(ERATIO_COLOR)
 

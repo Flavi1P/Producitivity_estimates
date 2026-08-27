@@ -42,7 +42,6 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import Patch
-from matplotlib.lines import Line2D
 from scipy.interpolate import CubicSpline, PchipInterpolator
 
 # Shared figure config = single source of truth (see Scripts/figure_config.py).
@@ -439,37 +438,16 @@ def main() -> int:
     draw_panel(axB, gop_vol, net_raw, "rate_vol_c", nvd, nvm, ncp_pts, "NCP_vol",
                npp_pts["date"], npp_pts["npp_vol"], (-3.0, 6.5), "(b)")
 
-    axA.set_ylabel(r"Areal rate (mmol C m$^{-2}$ d$^{-1}$)", fontsize=11)
+    axA.set_ylabel(r"Integrated rate (mmol C m$^{-2}$ d$^{-1}$)", fontsize=11)
     axB.set_ylabel(r"Volumetric rate (mmol C m$^{-3}$ d$^{-1}$)", fontsize=11)
 
-    # regime labels + "GOP is the ceiling" annotation on the top panel
+    # regime labels on the top panel
     axA.text(P1_START + (P1_END - P1_START) / 2, 292, "P1  spring onset",
              ha="center", va="top", fontsize=8.5, color="#8a6d0b",
              fontweight="bold")
     axA.text(P2_START + (P2_END - P2_START) / 2, 292, "P2  post-bloom drawdown",
              ha="center", va="top", fontsize=8.5, color="#5b4a7a",
              fontweight="bold")
-    axA.annotate("In the productive season, GOP sets the\n"
-                 "gross-production ceiling: NPP & NCP stay below",
-                 xy=(pd.Timestamp("2025-06-05"), 200),
-                 xytext=(pd.Timestamp("2025-08-05"), 255),
-                 fontsize=8.5, color=GOP_COLOR, ha="left", va="center",
-                 arrowprops=dict(arrowstyle="->", color=GOP_COLOR, lw=1.0),
-                 bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="none", alpha=0.75))
-
-    # arrows describing each regime on the volumetric panel
-    axB.annotate("spring onset: GOP, NPP, NCP\nrise together as mixing ceases",
-                 xy=(pd.Timestamp("2025-04-28"), 3.2),
-                 xytext=(pd.Timestamp("2024-12-05"), 5.2),
-                 fontsize=8.5, color="#8a6d0b", ha="left", va="center",
-                 arrowprops=dict(arrowstyle="->", color="#8a6d0b", lw=1.0),
-                 bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="none", alpha=0.75))
-    axB.annotate("NCP collapses toward 0\n(respiration) while GOP & NPP stay high",
-                 xy=(pd.Timestamp("2025-06-20"), 0.2),
-                 xytext=(pd.Timestamp("2025-07-25"), 4.4),
-                 fontsize=8.5, color="#5b4a7a", ha="left", va="center",
-                 arrowprops=dict(arrowstyle="->", color="#5b4a7a", lw=1.0),
-                 bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="none", alpha=0.75))
 
     # -------- integration-depth strip --------
     axD.plot(zbot_w["mtime"], zbot_w["z_bot_m"], lw=0.8, color=MLD_COLOR, alpha=0.9)
@@ -488,40 +466,7 @@ def main() -> int:
     axD.xaxis.set_major_formatter(mdates.DateFormatter("%b\n%Y"))
     axD.xaxis.set_minor_locator(mdates.MonthLocator())
 
-    # -------- shared legend --------
-    legend_handles = [
-        Line2D([0], [0], color=GOP_COLOR, lw=2.2,
-               label="GOP  (float O$_2$ budget, full MLD; O$_2$$\\to$C, PQ=1.45)"),
-        Line2D([0], [0], color=NPP_COLOR, lw=1.8, marker="o", ms=3.5,
-               mfc="white", mec=NPP_COLOR, label="NPP  (CbPM, Iceland Basin, 10-day)"),
-        Line2D([0], [0], color=NCP_COLOR, lw=2.0,
-               label="NCP  (float 3902681 nitrate budget, 30-day)"),
-    ]
-    leg = axA.legend(handles=legend_handles, loc="upper left", fontsize=8.5, ncol=1,
-                     handlelength=1.8, borderpad=0.5, labelspacing=0.4,
-                     frameon=True, framealpha=1.0)
-    leg.get_frame().set_facecolor("white")
-    leg.get_frame().set_edgecolor("none")
-    leg.set_zorder(20)
-
-    fig.suptitle(
-        "Float 3902681 (Iceland Basin, Nov 2024-Nov 2025): gross vs. net productivity\n"
-        "GOP $\\geq$ NPP $\\geq$ NCP on a common carbon axis (areal & volumetric)",
-        fontsize=13, y=0.985)
-
-    # caption footnote: native cadences + smoothing/lag note (FIGURE_HANDOFF Task 3.7)
-    fig.text(
-        0.5, 0.012,
-        "Native cadences: GOP dusk/dawn O$_2$ budget smoothed on an 18-day centered "
-        "window; NPP CbPM ~10-day; NCP float nitrate budget 30-day. The full GOP "
-        "record is shown; during winter deep convection the integration bottom "
-        "follows the mixed layer to depth, so the areal GOP swings off-scale and "
-        "runs off panel (a) (the volumetric rate in (b) stays bounded). The "
-        "GOP$\\geq$NPP$\\geq$NCP ordering and the P1$\\rightarrow$P2 lag were checked "
-        "to survive equal (18-day) smoothing of all three series.",
-        ha="center", va="bottom", fontsize=7.2, color="#444444", wrap=True)
-
-    fig.tight_layout(rect=(0, 0.035, 1, 0.955))
+    fig.tight_layout()
     OUT_PNG.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT_PNG, bbox_inches="tight", dpi=300)
     fig.savefig(OUT_PDF, bbox_inches="tight")

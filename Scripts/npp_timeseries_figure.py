@@ -21,14 +21,21 @@ Panel C  Seasonal reproducibility. Each year's observed months (Feb-Oct) are
          than the norm.  Colour scale is shared with the NCP figure, so the
          two are directly comparable.
 
+Units: the source CSV is in mg C m-2 d-1.  ``--units mmol`` re-renders the
+       identical figure in mmol C m-2 d-1 (divide by the 12.011 g/mol carbon
+       molar mass) and writes to ``*_mmol`` filenames so the mg version is not
+       overwritten.  R^2 and the regression slope in panel C are scale
+       invariant; only the intercept changes.
+
 Input:  Output/cmems_npp_timeseries_domain_mean.csv
-Output: Output/npp_timeseries_publication.png        (all three panels)
-        Output/npp_synthetic_year.png                 (panel B only)
-        Output/npp_seasonal_reproducibility.png       (panel C only)
-        Output/npp_seasonal_reproducibility.csv       (per-year metrics)
+Output: Output/npp_timeseries_publication[_mmol].png  (all three panels)
+        Output/npp_synthetic_year[_mmol].png           (panel B only)
+        Output/npp_seasonal_reproducibility[_mmol].png (panel C only)
+        Output/npp_seasonal_reproducibility[_mmol].csv (per-year metrics)
 """
 
 from __future__ import annotations
+import argparse
 import sys
 from pathlib import Path
 
@@ -54,11 +61,57 @@ from figure_config import (            # noqa: E402
 # Paths
 # ---------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CSV_FILE  = REPO_ROOT / "Output" / "cmems_npp_timeseries_domain_mean.csv"
-OUT_BOTH  = REPO_ROOT / "Output" / "npp_timeseries_publication.png"
-OUT_SYNTH = REPO_ROOT / "Output" / "npp_synthetic_year.png"
-OUT_REPRO = REPO_ROOT / "Output" / "npp_seasonal_reproducibility.png"
-OUT_STATS = REPO_ROOT / "Output" / "npp_seasonal_reproducibility.csv"
+OUT_DIR   = REPO_ROOT / "Output"
+CSV_FILE  = OUT_DIR / "cmems_npp_timeseries_domain_mean.csv"
+
+
+def out_paths(suffix: str):
+    """(3-panel, synthetic-year, reproducibility png, reproducibility csv)."""
+    return (OUT_DIR / f"npp_timeseries_publication{suffix}.png",
+            OUT_DIR / f"npp_synthetic_year{suffix}.png",
+            OUT_DIR / f"npp_seasonal_reproducibility{suffix}.png",
+            OUT_DIR / f"npp_seasonal_reproducibility{suffix}.csv")
+
+
+# ---------------------------------------------------------------------------
+# Units
+# ---------------------------------------------------------------------------
+# The CSV holds mg C m-2 d-1; mmol C is that divided by the carbon molar mass.
+MG_PER_MMOL_C = 12.011
+
+# y_bot / y_top / minor fix panel A's axis; panel B sizes itself to the data
+# but reuses y_bot and the minor-tick spacing.
+UNIT_SPECS = {
+    "mg": dict(
+        factor=1.0,
+        label="NPP (mg C m$^{-2}$ d$^{-1}$)",
+        y_bot=-50.0, y_top=1850.0, minor=100.0,
+        suffix="",
+    ),
+    "mmol": dict(
+        factor=1.0 / MG_PER_MMOL_C,
+        label="NPP (mmol C m$^{-2}$ d$^{-1}$)",
+        y_bot=-50.0 / MG_PER_MMOL_C, y_top=1850.0 / MG_PER_MMOL_C, minor=10.0,
+        suffix="_mmol",
+    ),
+}
+
+UNITS = "mg"      # module-level; set from --units in main()
+
+
+def U() -> dict:
+    """Active unit spec. Read through this, never cache it at import time."""
+    return UNIT_SPECS[UNITS]
+
+
+def convert_units(df: pd.DataFrame) -> pd.DataFrame:
+    """Scale every NPP column of the source CSV into the active units."""
+    df = df.copy()
+    f  = U()["factor"]
+    for col in ("npp_int_mean", "npp_int_std", "npp_int_p10", "npp_int_p90"):
+        if col in df.columns:
+            df[col] = df[col] * f
+    return df
 
 # ---------------------------------------------------------------------------
 # Style
@@ -292,14 +345,14 @@ def draw_panel_a(ax, df: pd.DataFrame):
                edgecolors="white")
 
     ax.set_xlim(pd.Timestamp(yr_min, 1, 1), pd.Timestamp(yr_max + 1, 1, 1))
-    ax.set_ylim(-50, 1850)
-    ax.yaxis.set_minor_locator(mpl.ticker.MultipleLocator(100))
+    ax.set_ylim(U()["y_bot"], U()["y_top"])
+    ax.yaxis.set_minor_locator(mpl.ticker.MultipleLocator(U()["minor"]))
 
     ax.xaxis.set_major_locator(mdates.YearLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     ax.xaxis.set_minor_locator(mdates.MonthLocator(bymonth=[4, 7, 10]))
 
-    ax.set_ylabel("NPP (mg C m$^{-2}$ d$^{-1}$)", fontsize=11)
+    ax.set_ylabel(U()["label"], fontsize=11)
     ax.set_xlabel("")
 
     # Legend — custom order
@@ -388,10 +441,10 @@ def draw_panel_b(ax, df: pd.DataFrame, stats: pd.DataFrame | None = None,
     # y-limits sized to contain every individual-year spline rather than a
     # hard-coded ceiling the coloured year lines could run through.
     hi = max(ymaxs + [float(np.nanmax(y_p90))])
-    ax.set_ylim(-50, hi * 1.12)
-    ax.yaxis.set_minor_locator(mpl.ticker.MultipleLocator(100))
+    ax.set_ylim(U()["y_bot"], hi * 1.12)
+    ax.yaxis.set_minor_locator(mpl.ticker.MultipleLocator(U()["minor"]))
 
-    ax.set_ylabel("NPP (mg C m$^{-2}$ d$^{-1}$)", fontsize=11)
+    ax.set_ylabel(U()["label"], fontsize=11)
     ax.set_xlabel("Month", fontsize=11)
 
     # Year labels in top-right corner
@@ -475,8 +528,18 @@ def draw_panel_c(ax, stats: pd.DataFrame, panel_label: str = "(c)"):
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> int:
-    df = pd.read_csv(CSV_FILE, parse_dates=["date"])
+def main(argv: list[str] | None = None) -> int:
+    global UNITS
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--units", choices=sorted(UNIT_SPECS), default="mg",
+                    help="carbon units for the NPP axes (default: mg)")
+    args = ap.parse_args(argv)
+    UNITS = args.units
+
+    OUT_BOTH, OUT_SYNTH, OUT_REPRO, OUT_STATS = out_paths(U()["suffix"])
+
+    df = convert_units(pd.read_csv(CSV_FILE, parse_dates=["date"]))
 
     stats = compute_reproducibility(df)
     OUT_STATS.parent.mkdir(parents=True, exist_ok=True)

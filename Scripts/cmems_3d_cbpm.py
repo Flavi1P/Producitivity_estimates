@@ -86,22 +86,24 @@ def interp_profile_to_1m(values: np.ndarray, src_depth: np.ndarray) -> np.ndarra
 
 
 def daily_par_from_noon(par_meas: float, lat: float, date: pd.Timestamp,
-                        clearsky_cache: dict) -> float:
+                        clearsky_cache: dict, day: int | None = 15) -> float:
     """Convert a (monthly-mean) surface PAR snapshot into a daily light
     integral (mol photons m-2 d-1) by scaling a pvlib clear-sky curve so
     its noon-UTC value equals par_meas, then integrating.
 
     The clear-sky curve depends only on (date, lat); cache it.
+    `day` picks the day of month for the curve (15 = mid-month, as used for
+    the monthly grid); pass None to use date.day.
     """
     if not np.isfinite(par_meas) or par_meas <= 0:
         return np.nan
 
-    key = (date.year, date.month, round(float(lat), 4))
+    day = date.day if day is None else day
+    key = (date.year, date.month, day, round(float(lat), 4))
     cached = clearsky_cache.get(key)
     if cached is None:
         loc = pvlib.location.Location(float(lat), 0.0, tz="UTC")
-        # use the 15th of the month as a representative day
-        d = pd.Timestamp(year=date.year, month=date.month, day=15, tz="UTC")
+        d = pd.Timestamp(year=date.year, month=date.month, day=day, tz="UTC")
         times = pd.date_range(
             f"{d:%Y-%m-%d} 00:00", f"{d:%Y-%m-%d} 23:59",
             freq="1min", tz="UTC",
